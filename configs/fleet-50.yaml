@@ -1,0 +1,23 @@
+server:
+  url: http://127.0.0.1:80
+network:
+  advertise_address: 127.0.0.1
+  worker_ip: 127.0.0.1
+simulation:
+  namespace: workersim-50
+  data_dir: ../.workersim
+  registration_rate: 5
+worker_groups:
+  - name_prefix: sim-h100
+    count: 25
+    gpu_profile: h100-80gb
+    gpu_count: 8
+    cpu_cores: 128
+    memory_gib: 1024
+  - name_prefix: sim-a800
+    count: 25
+    gpu_profile: a800-80gb
+    gpu_count: 8
+    cpu_cores: 96
+    memory_gib: 512
+

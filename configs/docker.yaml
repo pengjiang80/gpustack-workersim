@@ -1,0 +1,14 @@
+# WorkerSim uses host networking; the stock Server uses Docker's default bridge.
+server:
+  url: http://127.0.0.1:80
+network:
+  advertise_address: 172.17.0.1
+  worker_ip: 172.17.0.1
+simulation:
+  namespace: workersim-docker
+  data_dir: /data
+worker_groups:
+  - name_prefix: sim-h100
+    count: 2
+    gpu_profile: h100-80gb
+    gpu_count: 8

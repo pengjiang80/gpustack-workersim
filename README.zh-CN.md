@@ -1,0 +1,150 @@
+# GPUStack WorkerSim
+
+[English](README.md) · [发布流程](docs/publishing.md)
+
+**只用 CPU 主机，验证 GPUStack 的节点管理、模型调度、部署生命周期和监控展示。**
+
+WorkerSim 是独立的 GPUStack **2.3.1 Worker 协议模拟器**，无需修改 Server 或 UI。单进程最多管理 **100 个独立节点**，每个节点拥有自己的身份、心跳、事件订阅、HTTP 接口和监控端口。
+
+调度由真实 GPUStack Server 执行，WorkerSim 接收任务并模拟节点行为。无需真实 GPU、模型权重或推理引擎，监控指标均为合成数据。
+
+## 功能特性
+
+- 独立 Worker 注册、凭据、心跳、认证接口及身份持久化。
+- 配置节点数量、GPU/NPU 型号、卡数、CPU、内存、磁盘和标签。
+- 接收真实调度结果，上报初始化、启动、运行、失败和停止状态。
+- 支持普通副本、跨 Worker、PD 分离及已验证的 vLLM/SGLang 编排布局。
+- 独立订阅模型实例与模型文件事件，提供断线重连、完整分页同步及缩容清理。
+- 模拟文件下载进度、Ready 状态、虚拟路径和合成大小。
+- 上报 GPU 使用与分配、温度、功耗、模型请求与 Token、延迟及部分 KV/PD 指标。
+- 提供模拟聊天、流式聊天、embedding、rerank、语音转写和静音 WAV。
+- 模拟节点离线及实例故障，通过 GPUStack 正常机制验证恢复。
+
+## Docker 快速启动
+
+推荐使用 Linux host networking。先准备 GPUStack **2.3.1** Server，在 UI 创建测试集群，从添加 Worker 的说明中获取注册 Token。
+
+```bash
+git clone https://github.com/pengjiang80/gpustack-workersim.git
+cd gpustack-workersim
+```
+
+编辑 [`configs/docker.yaml`](configs/docker.yaml)：
+
+- `server.url`：模拟器可访问的 Server 根地址，不包含 `/v2`。
+- `server.cluster_id`：可显式设置目标集群 ID。
+- `network.advertise_address` 和 `network.worker_ip`：Server、Prometheus 均可访问的节点地址。
+
+默认示例为两个 H100 节点。`172.17.0.1` 是 Docker 网桥示例，部署时应使用实际地址。Server 容器里的 `127.0.0.1` 指向容器自身。
+
+```bash
+sudo python3 scripts/configure_port_reservations.py --workers 2 --apply
+export GPUSTACK_REGISTRATION_TOKEN='<集群注册Token>'
+docker pull gpustack/gpustack-workersim:0.4.5
+docker compose up -d --no-build
+docker compose logs -f workersim
+docker compose exec workersim workersim --config /config/fleet.yaml status
+```
+
+端口预留的 `--workers` 应与配置数量一致。脚本保留已有设置，不清理已经存在的连接或 TIME_WAIT。Compose 已设置自动重启、持久化 volume 和 `nofile=65536`。**linux/amd64** 镜像以 UID 10001 运行，不需要特权模式或 Docker socket。
+
+在 GPUStack UI 查看节点 Ready 状态，然后照常向测试集群部署模型。
+
+## 节点与设备配置
+
+```yaml
+server:
+  url: http://127.0.0.1:8080
+  cluster_id: 1
+network:
+  advertise_address: 172.17.0.1
+  worker_ip: 172.17.0.1
+simulation:
+  namespace: workersim-b300
+  data_dir: /data
+  registration_rate: 2
+  reconcile_interval: 30
+  model_requests_per_second: 2
+worker_groups:
+  - name_prefix: sim-b300
+    count: 10
+    gpu_profile: b300-288gb
+    gpu_count: 8
+    cpu_cores: 192
+    memory_gib: 2048
+    disk_gib: 8192
+```
+
+`model_requests_per_second` 默认生成每实例约 2 RPS 的合成后台流量，与实际客户端请求无关；设为 0 可显示空闲模型流量。
+
+| 预设 | 设备 | 每卡模拟显存 | 运行时 |
+|---|---|---:|---|
+| `b300-288gb` | NVIDIA B300 | 288 GiB | CUDA |
+| `h100-80gb` | NVIDIA H100 | 80 GiB | CUDA |
+| `a800-80gb` | NVIDIA A800 | 80 GiB | CUDA |
+| `rtx4090-24gb` | NVIDIA RTX 4090 | 24 GiB | CUDA |
+| `ascend-910b4-64gb` | Ascend 910B4 | 64 GiB | CANN |
+
+容量、版本和功耗属于模拟配置，不代表真实设备的精确参数。Ascend 按 `ascend/cann` 上报，不填写 CUDA compute capability。
+
+示例：[50 个混合 GPU 节点](configs/fleet-50.yaml)、[100 个八卡 B300 节点](configs/fleet-100-b300.yaml)、[3 个八卡 910B4 节点](configs/demo2-3-910b4.yaml)。
+
+## 网络与持久化
+
+默认同 IP、不同端口：Worker API 从 20100 开始，监控从 20200 开始，每节点各占一个端口；模型端口每节点占 64 个，从 40000 开始。100 节点范围为 **40000–46399**，控制接口仅监听 `127.0.0.1:20099`。
+
+同主机多个进程应使用不同端口池。独立 IP 可通过 `network.worker_ip_cidr` 配置，并先准备宿主机地址和路由；可参考 [`configure_virtual_network.py`](scripts/configure_virtual_network.py)。
+
+保留数据目录或 Docker volume 即可保留 Worker 身份。每个命名空间对应一个 Server URL，进程锁防止并发使用同一套身份。节点配置改变后需重启，保持节点名和分组顺序可稳定端口。
+
+## 扩缩容与故障测试
+
+模型可直接通过 UI/API 部署。自动副本测试另需平台管理员 API Key：
+
+```bash
+export GPUSTACK_API_KEY='<GPUStack平台管理员APIKey>'
+workersim --config configs/local.yaml scenario --replicas 2 5 1 0 --timeout 300
+```
+
+命令创建自己管理的测试模型，调整副本数并等待收敛，最后删除该测试模型。报告保存至 `outputs/scenario.json`，耗时包含调度、模拟启动和控制器处理。
+
+```bash
+workersim --config configs/local.yaml fleet-scale 1
+workersim --config configs/local.yaml fleet-scale 2
+workersim --config configs/local.yaml stop
+```
+
+`fleet-scale` 改变在线数量，不代表注册或删除 Worker。离线展示由 Server 心跳宽限期决定。控制 API 的 `POST /fault` 可注入实例运行失败。
+
+## 验证与使用限制
+
+- 原版 2.3.1：[100 Worker / 800 张 B300 验证](docs/workersim-040-validation.md)。
+- GLM-5.3 5P3D：[10–100 Worker 规模实验](docs/glm53-pd-benchmark-2026-11-17.md)，具体版本及测量边界见报告。
+- 企业版 2.3.1-ent2：[50 个 B300 Worker、16 个模型、116 个 Running 副本验收快照](docs/demo2-deployment-2026-11-17.md)。
+- Ascend：[3 个 Worker、24 张 64 GiB 设备及监控、双 watch、重启恢复](docs/demo2-910b4-2026-11-17.md)。
+
+目标协议为 GPUStack v2.3.1、commit `458030e88718ce47bd31f7cdee9cbc8994a6760b`。其他版本需要单独验证，已测试企业版显式启用 `allow_version_mismatch`。
+
+不执行真实推理、权重下载、GPU kernel、NCCL/Ray 或 KV 数据传输。embedding 为测试向量，rerank 使用固定顺序，转写返回模拟提示，TTS 固定返回 **0.25 秒静音 WAV**。指标不能用于真实推理性能、请求审计或计费。
+
+部分企业版实例可能残留历史下载百分比；模型文件 Ready/100% 与实例 Running 的验证结果见报告。资源放置和调度始终由 Server 决定，未验证所有 backend/layout 组合。
+
+## 本地开发与发布
+
+需要 Python 3.11+，大规模模拟推荐 Linux：
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e '.[dev]'
+workersim --config configs/local.yaml validate
+ruff check workersim scripts tests
+ulimit -n 65536
+pytest -q
+```
+
+编辑本地配置、设置注册 Token 后，执行 `workersim --config configs/local.yaml run`。Windows 使用 `.venv\Scripts\Activate.ps1` 激活环境。回环协议测试与实际 Server/UI 集成验证分别执行。GitHub Actions、Docker Hub 凭据和版本标签规则见[发布说明](docs/publishing.md)。
+
+## 许可证
+
+见 [LICENSE](LICENSE)。派生 GPUStack helper 保留[原许可证](workersim/_vendor/LICENSE-GPUStack.txt)和[来源说明](workersim/_vendor/NOTICE.md)。

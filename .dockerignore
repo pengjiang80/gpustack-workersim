@@ -1,0 +1,7 @@
+*
+!LICENSE
+!pyproject.toml
+!requirements.lock
+!workersim/
+!workersim/**
+

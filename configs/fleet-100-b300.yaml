@@ -1,0 +1,22 @@
+# WorkerSim and Server share a Linux host; adjust addresses for your Docker network.
+server:
+  url: http://127.0.0.1:18080
+  request_timeout: 120
+network:
+  advertise_address: 172.17.0.1
+  worker_ip: 172.17.0.1
+  # Optional: configure host aliases first, then enable distinct node IPs.
+  # worker_ip_cidr: 10.250.0.0/24
+simulation:
+  namespace: workersim-b300
+  data_dir: /data
+  registration_rate: 2
+  reconcile_interval: 30
+worker_groups:
+  - name_prefix: sim-b300
+    count: 100
+    gpu_profile: b300-288gb
+    gpu_count: 8
+    cpu_cores: 192
+    memory_gib: 2048
+    disk_gib: 8192

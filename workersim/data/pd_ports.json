@@ -1,0 +1,173 @@
+[
+  {
+    "name": "vllm-nixl",
+    "roles": [
+      {
+        "name": "prefill",
+        "ports": [
+          {
+            "name": "kv_side_channel",
+            "count": "{{data_parallel_size}}",
+            "inject_to": "env",
+            "scope": "instance"
+          }
+        ]
+      },
+      {
+        "name": "decode",
+        "ports": [
+          {
+            "name": "kv_side_channel",
+            "count": "{{data_parallel_size}}",
+            "inject_to": "env",
+            "scope": "instance"
+          }
+        ]
+      }
+    ],
+    "router": {
+      "ports": [
+        {
+          "name": "prometheus",
+          "count": 1,
+          "inject_to": "args",
+          "scope": "instance"
+        }
+      ]
+    }
+  },
+  {
+    "name": "vllm-mooncake",
+    "roles": [
+      {
+        "name": "prefill",
+        "ports": [
+          {
+            "name": "bootstrap",
+            "count": 1,
+            "inject_to": "env",
+            "scope": "instance"
+          }
+        ]
+      },
+      {
+        "name": "decode",
+        "ports": []
+      }
+    ],
+    "router": {
+      "ports": [
+        {
+          "name": "prometheus",
+          "count": 1,
+          "inject_to": "args",
+          "scope": "instance"
+        }
+      ]
+    }
+  },
+  {
+    "name": "sglang-mooncake",
+    "roles": [
+      {
+        "name": "prefill",
+        "ports": [
+          {
+            "name": "bootstrap",
+            "count": 1,
+            "inject_to": "args",
+            "scope": "instance"
+          }
+        ]
+      },
+      {
+        "name": "decode",
+        "ports": []
+      }
+    ],
+    "router": {
+      "ports": [
+        {
+          "name": "prometheus",
+          "count": 1,
+          "inject_to": "args",
+          "scope": "instance"
+        }
+      ]
+    }
+  },
+  {
+    "name": "sglang-nixl",
+    "roles": [
+      {
+        "name": "prefill",
+        "ports": [
+          {
+            "name": "bootstrap",
+            "count": 1,
+            "inject_to": "args",
+            "scope": "instance"
+          }
+        ]
+      },
+      {
+        "name": "decode",
+        "ports": []
+      }
+    ],
+    "router": {
+      "ports": [
+        {
+          "name": "prometheus",
+          "count": 1,
+          "inject_to": "args",
+          "scope": "instance"
+        }
+      ]
+    }
+  },
+  {
+    "name": "vllm-ascend-mooncake",
+    "roles": [
+      {
+        "name": "prefill",
+        "ports": [
+          {
+            "name": "kv_port",
+            "count": "{{accelerator_count}}",
+            "inject_to": "args",
+            "scope": "instance"
+          }
+        ]
+      },
+      {
+        "name": "decode",
+        "ports": [
+          {
+            "name": "kv_port",
+            "count": "{{accelerator_count}}",
+            "inject_to": "args",
+            "scope": "instance"
+          }
+        ]
+      }
+    ],
+    "router": {
+      "ports": [
+        {
+          "name": "prometheus",
+          "count": 1,
+          "inject_to": "args",
+          "scope": "instance"
+        }
+      ]
+    }
+  },
+  {
+    "name": "custom",
+    "roles": [],
+    "router": {
+      "ports": []
+    }
+  }
+]

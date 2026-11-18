@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpustack-workersim"
+version = "0.4.5"
+description = "CPU-only Worker protocol simulator for unmodified GPUStack 2.3.1"
+requires-python = ">=3.11"
+dependencies = ["aiohttp>=3.10,<4", "PyYAML>=6,<7"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.24,<2", "ruff>=0.9,<1"]
+
+[project.scripts]
+workersim = "workersim.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["workersim*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "ASYNC"]
+
+
+[tool.setuptools.package-data]
+"workersim._vendor" = ["*.txt", "*.md"]
+"workersim" = ["data/*.json"]

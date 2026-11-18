@@ -1,0 +1,532 @@
+[
+  {
+    "name": "workersim-deepseek-v3.2",
+    "source": "huggingface",
+    "huggingface_repo_id": "deepseek-ai/DeepSeek-V3.2",
+    "categories": [
+      "llm"
+    ],
+    "backend": "vLLM",
+    "backend_version": "0.33.0",
+    "distributed_inference_across_workers": true,
+    "backend_parameters": [
+      "--tensor-parallel-size=8",
+      "--gpu-memory-utilization=0.9",
+      "--max-model-len=32768",
+      "--trust-remote-code"
+    ],
+    "cluster_id": 3,
+    "replicas": 10,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "name": "workersim-glm-5.3",
+    "source": "huggingface",
+    "huggingface_repo_id": "zai-org/GLM-5.3",
+    "categories": [
+      "llm"
+    ],
+    "backend": "vLLM",
+    "backend_version": "0.33.0",
+    "distributed_inference_across_workers": true,
+    "backend_parameters": [
+      "--tensor-parallel-size=8",
+      "--gpu-memory-utilization=0.9",
+      "--max-model-len=32768",
+      "--trust-remote-code"
+    ],
+    "cluster_id": 3,
+    "replicas": 10,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "name": "workersim-kimi-k2.5",
+    "source": "huggingface",
+    "huggingface_repo_id": "moonshotai/Kimi-K2.5",
+    "categories": [
+      "llm"
+    ],
+    "backend": "vLLM",
+    "backend_version": "0.33.0",
+    "distributed_inference_across_workers": true,
+    "backend_parameters": [
+      "--tensor-parallel-size=8",
+      "--gpu-memory-utilization=0.9",
+      "--max-model-len=32768",
+      "--trust-remote-code"
+    ],
+    "cluster_id": 3,
+    "replicas": 10,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "name": "workersim-qwen3.5-397b-a17b",
+    "source": "huggingface",
+    "huggingface_repo_id": "Qwen/Qwen3.5-397B-A17B",
+    "categories": [
+      "llm"
+    ],
+    "backend": "vLLM",
+    "backend_version": "0.33.0",
+    "distributed_inference_across_workers": true,
+    "backend_parameters": [
+      "--tensor-parallel-size=8",
+      "--gpu-memory-utilization=0.9",
+      "--max-model-len=32768",
+      "--trust-remote-code"
+    ],
+    "cluster_id": 3,
+    "replicas": 10,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "source": "huggingface",
+    "huggingface_repo_id": "BAAI/bge-m3",
+    "backend": "vLLM",
+    "backend_version": "0.25.1",
+    "backend_parameters": [
+      "--gpu-memory-utilization=0.1"
+    ],
+    "categories": [
+      "embedding"
+    ],
+    "meta": {
+      "max_model_len": 8192
+    },
+    "name": "workersim-bge-m3",
+    "distributed_inference_across_workers": false,
+    "cluster_id": 3,
+    "replicas": 2,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "source": "huggingface",
+    "huggingface_repo_id": "BAAI/bge-reranker-v2-m3",
+    "backend": "vLLM",
+    "backend_version": "0.25.1",
+    "backend_parameters": [
+      "--gpu-memory-utilization=0.1"
+    ],
+    "categories": [
+      "reranker"
+    ],
+    "meta": {
+      "max_model_len": 8192
+    },
+    "name": "workersim-bge-reranker-v2-m3",
+    "distributed_inference_across_workers": false,
+    "cluster_id": 3,
+    "replicas": 2,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "source": "huggingface",
+    "huggingface_repo_id": "Qwen/Qwen3-ASR-0.6B",
+    "backend": "vLLM",
+    "backend_version": "0.25.1",
+    "backend_parameters": [
+      "--gpu-memory-utilization 0.1"
+    ],
+    "categories": [
+      "speech_to_text"
+    ],
+    "meta": {
+      "languages": [
+        "en",
+        "zh",
+        "af",
+        "ar",
+        "hy",
+        "az",
+        "be",
+        "bs",
+        "bg",
+        "ca",
+        "hr",
+        "cs",
+        "da",
+        "nl",
+        "et",
+        "fi",
+        "fr",
+        "gl",
+        "de",
+        "el",
+        "he",
+        "hi",
+        "hu",
+        "is",
+        "id",
+        "it",
+        "ja",
+        "kn",
+        "kk",
+        "ko",
+        "lv",
+        "lt",
+        "mk",
+        "ms",
+        "mr",
+        "mi",
+        "ne",
+        "no",
+        "fa",
+        "pl",
+        "pt",
+        "ro",
+        "ru",
+        "sr",
+        "sk",
+        "sl",
+        "es",
+        "sw",
+        "sv",
+        "tl",
+        "ta",
+        "th",
+        "tr",
+        "uk",
+        "ur",
+        "vi",
+        "cy"
+      ]
+    },
+    "name": "workersim-qwen3-asr-0.6b",
+    "distributed_inference_across_workers": false,
+    "cluster_id": 3,
+    "replicas": 2,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "source": "huggingface",
+    "huggingface_repo_id": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "backend": "vLLM",
+    "backend_version": "0.22.1",
+    "backend_parameters": [
+      "--omni",
+      "--gpu-memory-utilization=0.1"
+    ],
+    "categories": [
+      "text_to_speech"
+    ],
+    "meta": {
+      "languages": [
+        "Auto",
+        "Chinese",
+        "English",
+        "German",
+        "Italian",
+        "Portuguese",
+        "Spanish",
+        "Japanese",
+        "Korean",
+        "French",
+        "Russian"
+      ],
+      "voices": [
+        "Vivian",
+        "Serena",
+        "Uncle_Fu",
+        "Dylan",
+        "Eric",
+        "Ryan",
+        "Aiden",
+        "Ono_Anna",
+        "Sohee"
+      ],
+      "task_type": "CustomVoice",
+      "max_model_len": 4096
+    },
+    "name": "workersim-qwen3-tts-12hz-1.7b-customvoice",
+    "distributed_inference_across_workers": false,
+    "cluster_id": 3,
+    "replicas": 2,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "name": "workersim-qwen3-32b",
+    "source": "huggingface",
+    "huggingface_repo_id": "Qwen/Qwen3-32B",
+    "categories": [
+      "llm"
+    ],
+    "replicas": 16,
+    "backend": "vLLM",
+    "backend_version": "0.33.0",
+    "backend_parameters": [
+      "--tensor-parallel-size=1",
+      "--gpu-memory-utilization=0.9",
+      "--max-model-len=8192",
+      "--trust-remote-code"
+    ],
+    "cluster_id": 3,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "name": "workersim-qwen3-8b",
+    "source": "huggingface",
+    "huggingface_repo_id": "Qwen/Qwen3-8B",
+    "categories": [
+      "llm"
+    ],
+    "replicas": 16,
+    "backend": "vLLM",
+    "backend_version": "0.33.0",
+    "backend_parameters": [
+      "--tensor-parallel-size=1",
+      "--gpu-memory-utilization=0.9",
+      "--max-model-len=8192",
+      "--trust-remote-code"
+    ],
+    "cluster_id": 3,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "name": "workersim-deepseek-r1-distill-qwen-32b",
+    "source": "huggingface",
+    "huggingface_repo_id": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+    "categories": [
+      "llm"
+    ],
+    "replicas": 12,
+    "backend": "vLLM",
+    "backend_version": "0.33.0",
+    "backend_parameters": [
+      "--tensor-parallel-size=1",
+      "--gpu-memory-utilization=0.9",
+      "--max-model-len=8192",
+      "--trust-remote-code"
+    ],
+    "cluster_id": 3,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "name": "workersim-qwen3-vl-32b-instruct",
+    "source": "huggingface",
+    "huggingface_repo_id": "Qwen/Qwen3-VL-32B-Instruct",
+    "categories": [
+      "llm"
+    ],
+    "replicas": 4,
+    "backend": "vLLM",
+    "backend_version": "0.33.0",
+    "backend_parameters": [
+      "--tensor-parallel-size=2",
+      "--gpu-memory-utilization=0.9",
+      "--max-model-len=8192",
+      "--trust-remote-code"
+    ],
+    "cluster_id": 3,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "name": "workersim-qwen3-embedding-8b",
+    "source": "huggingface",
+    "huggingface_repo_id": "Qwen/Qwen3-Embedding-8B",
+    "categories": [
+      "embedding"
+    ],
+    "replicas": 8,
+    "backend": "vLLM",
+    "backend_version": "0.33.0",
+    "backend_parameters": [
+      "--tensor-parallel-size=1",
+      "--gpu-memory-utilization=0.9",
+      "--max-model-len=8192",
+      "--trust-remote-code"
+    ],
+    "cluster_id": 3,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "name": "workersim-qwen3-reranker-8b",
+    "source": "huggingface",
+    "huggingface_repo_id": "Qwen/Qwen3-Reranker-8B",
+    "categories": [
+      "reranker"
+    ],
+    "replicas": 8,
+    "backend": "vLLM",
+    "backend_version": "0.33.0",
+    "backend_parameters": [
+      "--tensor-parallel-size=1",
+      "--gpu-memory-utilization=0.9",
+      "--max-model-len=8192",
+      "--trust-remote-code"
+    ],
+    "cluster_id": 3,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "source": "huggingface",
+    "huggingface_repo_id": "Qwen/Qwen3-ASR-1.7B",
+    "backend": "vLLM",
+    "backend_version": "0.25.1",
+    "backend_parameters": [
+      "--gpu-memory-utilization=0.9"
+    ],
+    "categories": [
+      "speech_to_text"
+    ],
+    "meta": {
+      "languages": [
+        "en",
+        "zh",
+        "af",
+        "ar",
+        "hy",
+        "az",
+        "be",
+        "bs",
+        "bg",
+        "ca",
+        "hr",
+        "cs",
+        "da",
+        "nl",
+        "et",
+        "fi",
+        "fr",
+        "gl",
+        "de",
+        "el",
+        "he",
+        "hi",
+        "hu",
+        "is",
+        "id",
+        "it",
+        "ja",
+        "kn",
+        "kk",
+        "ko",
+        "lv",
+        "lt",
+        "mk",
+        "ms",
+        "mr",
+        "mi",
+        "ne",
+        "no",
+        "fa",
+        "pl",
+        "pt",
+        "ro",
+        "ru",
+        "sr",
+        "sk",
+        "sl",
+        "es",
+        "sw",
+        "sv",
+        "tl",
+        "ta",
+        "th",
+        "tr",
+        "uk",
+        "ur",
+        "vi",
+        "cy"
+      ]
+    },
+    "name": "workersim-qwen3-asr-1.7b",
+    "distributed_inference_across_workers": false,
+    "cluster_id": 3,
+    "replicas": 2,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  },
+  {
+    "source": "huggingface",
+    "huggingface_repo_id": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    "backend": "vLLM",
+    "backend_version": "0.22.1",
+    "backend_parameters": [
+      "--omni",
+      "--gpu-memory-utilization=0.9"
+    ],
+    "categories": [
+      "text_to_speech"
+    ],
+    "meta": {
+      "languages": [
+        "Auto",
+        "Chinese",
+        "English",
+        "German",
+        "Italian",
+        "Portuguese",
+        "Spanish",
+        "Japanese",
+        "Korean",
+        "French",
+        "Russian"
+      ],
+      "voices": [
+        "Vivian",
+        "Serena",
+        "Uncle_Fu",
+        "Dylan",
+        "Eric",
+        "Ryan",
+        "Aiden",
+        "Ono_Anna",
+        "Sohee"
+      ],
+      "task_type": "CustomVoice",
+      "max_model_len": 4096
+    },
+    "name": "workersim-qwen3-tts-12hz-0.6b-customvoice",
+    "distributed_inference_across_workers": false,
+    "cluster_id": 3,
+    "replicas": 2,
+    "placement_strategy": "spread",
+    "cpu_offloading": false,
+    "description": "WorkerSim: synthetic deployment and traffic, no real inference.",
+    "enable_model_route": true
+  }
+]

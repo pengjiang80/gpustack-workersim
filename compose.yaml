@@ -1,0 +1,22 @@
+services:
+  workersim:
+    build: .
+    image: gpustack/gpustack-workersim:0.4.5
+    network_mode: host
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    environment:
+      GPUSTACK_REGISTRATION_TOKEN: ${GPUSTACK_REGISTRATION_TOKEN:?Set a cluster registration token}
+      GPUSTACK_API_KEY: ${GPUSTACK_API_KEY:-}
+    volumes:
+      - ./configs/docker.yaml:/config/fleet.yaml:ro
+      - workersim-data:/data
+
+volumes:
+  workersim-data:
+

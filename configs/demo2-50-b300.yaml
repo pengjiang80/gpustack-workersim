@@ -1,0 +1,33 @@
+{
+  "server": {
+    "url": "http://127.0.0.1:8080",
+    "cluster_id": 3,
+    "allow_version_mismatch": true,
+    "request_timeout": 60
+  },
+  "network": {
+    "advertise_address": "172.17.0.1",
+    "worker_ip": "172.17.0.1",
+    "bind_host": "172.17.0.1"
+  },
+  "simulation": {
+    "namespace": "workersim-demo2",
+    "data_dir": "/data",
+    "registration_rate": 2,
+    "reconcile_interval": 30
+  },
+  "worker_groups": [
+    {
+      "name_prefix": "sim-b300",
+      "count": 50,
+      "gpu_profile": "b300-288gb",
+      "gpu_count": 8,
+      "cpu_cores": 192,
+      "memory_gib": 2048,
+      "disk_gib": 8192,
+      "labels": {
+        "environment": "workersim-demo2"
+      }
+    }
+  ]
+}

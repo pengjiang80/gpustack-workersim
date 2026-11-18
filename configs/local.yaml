@@ -1,0 +1,34 @@
+server:
+  url: http://127.0.0.1:80
+  registration_token_env: GPUSTACK_REGISTRATION_TOKEN
+  api_key_env: GPUSTACK_API_KEY
+
+network:
+  bind_host: 0.0.0.0
+  advertise_address: 127.0.0.1
+  worker_ip: 127.0.0.1
+  api_port_base: 20100
+  metrics_port_base: 20200
+  instance_port_start: 21000
+  instance_port_end: 29999
+  control_port: 20099
+
+simulation:
+  namespace: workersim-local
+  data_dir: ../.workersim
+  seed: 42
+  registration_rate: 5
+  heartbeat_interval: 30
+  status_interval: 30
+  reconcile_interval: 10
+  download_seconds: 1
+  startup_seconds: 2
+
+worker_groups:
+  - name_prefix: sim-h100
+    count: 2
+    gpu_profile: h100-80gb
+    gpu_count: 4
+    cpu_cores: 128
+    memory_gib: 1024
+
