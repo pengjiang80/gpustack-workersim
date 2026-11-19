@@ -60,6 +60,7 @@ class ControlPlane:
         self.instances = {}
         self.files = {}
         self.models = {}
+        self.inference_backends = {}
         self.watchers = {}
         self.statuses = {}
         self.heartbeats = {}
@@ -127,7 +128,7 @@ class ControlPlane:
         if path == f"/v2/workers/{worker_id}":
             return web.json_response(worker | {"me": True})
         if path == "/v2/inference-backends/all":
-            return web.json_response([])
+            return web.json_response(list(self.inference_backends.values()))
         if path == "/v2/cache-providers":
             return web.json_response({"items": []})
         if path == "/v2/metrics/config":
@@ -141,7 +142,8 @@ class ControlPlane:
         resource = path.split("/")[2]
         resources = {
             "model-files": self.files, "model-instances": self.instances, "models": self.models,
-            "inference-backends": {}, "benchmarks": {}, "cache-service-instances": {},
+            "inference-backends": self.inference_backends,
+            "benchmarks": {}, "cache-service-instances": {},
         }
         rows = resources.get(resource, {})
         if path.startswith("/v2/models/"):

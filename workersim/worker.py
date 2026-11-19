@@ -109,16 +109,24 @@ class VirtualWorker:
                 self.periodic("heartbeat", self.config.simulation.heartbeat_interval)
             ),
             asyncio.create_task(self.periodic("status", self.config.simulation.status_interval)),
-            asyncio.create_task(self.reconcile()),
-            asyncio.create_task(self.auxiliary_reports("providers", CACHE_PROVIDER_INTERVAL, 0)),
             asyncio.create_task(self.auxiliary_reports(
                 "runtime-metrics", RUNTIME_METRICS_INTERVAL, RUNTIME_METRICS_INITIAL_DELAY
             )),
+        ]
+        for task in self.tasks:
+            task.add_done_callback(self.background_done)
+        # Native heartbeat/status threads are running while the Backend manager initializes.
+        rows = await self.client.request("GET", "/inference-backends/all")
+        self.watch_caches["inference-backends"] = {row["id"]: row for row in rows}
+        later_tasks = [
+            asyncio.create_task(self.reconcile()),
+            asyncio.create_task(self.auxiliary_reports("providers", CACHE_PROVIDER_INTERVAL, 0)),
             asyncio.create_task(self.auxiliary_reports("benchmarks", STATE_SYNC_INTERVAL, 15)),
             asyncio.create_task(self.auxiliary_reports("cache-services", STATE_SYNC_INTERVAL, 3)),
             *[asyncio.create_task(self.watch(resource)) for resource in WATCH_RESOURCES],
         ]
-        for task in self.tasks:
+        self.tasks.extend(later_tasks)
+        for task in later_tasks:
             task.add_done_callback(self.background_done)
 
     async def register(self, registration_token):
@@ -160,9 +168,6 @@ class VirtualWorker:
         me = await self.client.request("GET", "/workers", params={"me": "true"})
         if len(me.get("items", [])) != 1 or me["items"][0]["id"] != self.worker_id:
             raise RuntimeError("Native Worker self lookup did not return this identity")
-        # InferenceBackendManager initializes this cache once before opening its listener.
-        rows = await self.client.request("GET", "/inference-backends/all")
-        self.watch_caches["inference-backends"] = {row["id"]: row for row in rows}
 
     def background_done(self, task):
         if not task.cancelled() and task.exception():
@@ -252,9 +257,7 @@ class VirtualWorker:
                 ValueError,
             ) as error:
                 self.report_errors += 1
-                self.last_error = (
-                    str(error) if isinstance(error, APIError) else type(error).__name__
-                )
+                self.last_error = str(error) or type(error).__name__
                 log.warning("%s watch reconnect: %s", self.spec.name, self.last_error)
             finally:
                 if resource in ("model-files", "model-instances"):

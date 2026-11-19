@@ -74,7 +74,7 @@ class Client:
     ) -> AsyncIterator[dict]:
         assert self.session is not None
         url = self.config.url.rstrip("/") + "/v2" + path
-        timeout = aiohttp.ClientTimeout(total=None, connect=10, sock_read=45)
+        timeout = aiohttp.ClientTimeout(total=None, connect=10, sock_read=None)
         async with self.session.get(
             url, params={"watch": "true", **params}, timeout=timeout
         ) as response:
@@ -82,11 +82,26 @@ class Client:
                 raise APIError(response.status, "GET", path + "?watch=true")
             if on_connect is not None:
                 on_connect()
-            # The native client decodes NDJSON despite Content-Type: text/event-stream.
+            # Native httpx.aiter_lines has no aiohttp readline() 64-KiB line ceiling.
+            async def iter_lines():
+                pending = b""
+                while True:
+                    chunk = await response.content.readany()
+                    if not chunk:
+                        if pending:
+                            yield pending
+                        return
+                    parts = (pending + chunk).split(b"\n")
+                    pending = parts.pop()
+                    for part in parts:
+                        yield part.rstrip(b"\r")
+
+            lines = iter_lines()
             while True:
-                line = await response.content.readline()
-                if not line:
-                    raise ConnectionError("Model instance watch closed")
+                try:
+                    line = await asyncio.wait_for(anext(lines), 45)
+                except StopAsyncIteration:
+                    raise ConnectionError("Watch stream closed by server") from None
                 line = line.strip()
                 if not line or line.startswith(b":"):
                     continue

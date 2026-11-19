@@ -169,10 +169,15 @@ class Runtime:
             await self.release(record)
             record.phase = "error"
 
-    async def current(self, record):
-        latest = await self.worker.client.request(
-            "GET", f"/model-instances/{record.instance['id']}"
-        )
+    async def current(self, record, *, authoritative=False, check_configuration=False):
+        latest = None
+        if self.worker.watch_connected and not authoritative:
+            latest = self.worker.watch_caches["model-instances"].get(record.instance["id"])
+        if latest is None:
+            latest = await self.worker.client.request(
+                "GET", f"/model-instances/{record.instance['id']}",
+                params={"check_configuration": "true"} if check_configuration else None,
+            )
         member = local_member(latest, self.worker.worker_id)
         if member is None or (latest.get("restart_count") or 0) != record.generation:
             self.worker.instances.pop(record.instance["id"], None)
@@ -182,7 +187,12 @@ class Runtime:
         return latest
 
     async def report(self, record, fields, *, fenced=False):
-        instance = await self.current(record)
+        instance = await self.current(
+            record,
+            authoritative=managed(record.instance) and not (
+                "workloads" in fields or "observations" in fields
+            ),
+        )
         if instance is None:
             return False
         servers = instance.get("distributed_servers") or {}
@@ -430,7 +440,7 @@ class Runtime:
                 return
             if not primary and mode == "initialize_later" and instance.get("state") == "scheduled":
                 return
-            if await self.current(record) is None:
+            if await self.current(record, authoritative=True, check_configuration=True) is None:
                 return
             if not record.model:
                 await self.load_model(record)
