@@ -80,6 +80,7 @@ class VirtualWorker:
             self.config.server,
             self.identity.get("token", registration_token),
             connector=self.fleet.connector,
+            request_slots=self.fleet.request_slots,
         ).open()
         try:
             body = self.status_payload() | {
@@ -107,7 +108,10 @@ class VirtualWorker:
         self.worker_id = self.identity["id"]
         self.fleet.store.save(self.spec.name, self.identity)
         self.client = await Client(
-            self.config.server, self.identity["token"], connector=self.fleet.connector
+            self.config.server,
+            self.identity["token"],
+            connector=self.fleet.connector,
+            request_slots=self.fleet.request_slots,
         ).open()
         await self.client.request("POST", "/worker-status", body=self.status_payload())
         log.info("Registered %s, Worker %s", self.spec.name, self.worker_id)

@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from contextlib import nullcontext
 
 import aiohttp
 
@@ -17,10 +18,11 @@ class APIError(Exception):
 
 
 class Client:
-    def __init__(self, config: ServerConfig, token: str, *, connector=None):
+    def __init__(self, config: ServerConfig, token: str, *, connector=None, request_slots=None):
         self.config = config
         self.token = token
         self.connector = connector
+        self.request_slots = request_slots
         self.session: aiohttp.ClientSession | None = None
 
     async def open(self):
@@ -42,12 +44,13 @@ class Client:
     async def request(self, method: str, path: str, *, body=None, params=None, root=False):
         assert self.session is not None
         url = self.config.url.rstrip("/") + ("" if root else "/v2") + path
-        async with self.session.request(method, url, json=body, params=params) as response:
-            if response.status >= 400:
-                raise APIError(response.status, method, path)
-            if response.status == 204:
-                return None
-            return await response.json()
+        async with self.request_slots or nullcontext():
+            async with self.session.request(method, url, json=body, params=params) as response:
+                if response.status >= 400:
+                    raise APIError(response.status, method, path)
+                if response.status == 204:
+                    return None
+                return await response.json()
 
     async def list_all(self, path: str, **params) -> list[dict]:
         page, result = 1, []
@@ -66,9 +69,12 @@ class Client:
         assert self.session is not None
         url = self.config.url.rstrip("/") + "/v2" + path
         timeout = aiohttp.ClientTimeout(total=None, connect=10, sock_read=45)
-        async with self.session.get(
-            url, params={"watch": "true", **params}, timeout=timeout
-        ) as response:
+        # Bound the auth/headers handshake, but never hold a request slot for the stream lifetime.
+        async with self.request_slots or nullcontext():
+            response = await self.session.get(
+                url, params={"watch": "true", **params}, timeout=timeout
+            )
+        async with response:
             if response.status >= 400:
                 raise APIError(response.status, "GET", path + "?watch=true")
             if on_connect is not None:

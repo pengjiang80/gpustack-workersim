@@ -67,12 +67,21 @@ class ControlPlane:
         self.registration_delay = 0
         self.registrations_inflight = 0
         self.max_registrations_inflight = 0
+        self.api_delay = 0
+        self.api_inflight = 0
+        self.max_api_inflight = 0
 
     async def handler(self, request):
         path = request.path
         if path == "/version":
             return web.json_response({"version": "2.3.1", "git_commit": "458030e8"})
         token = request.headers.get("Authorization", "").removeprefix("Bearer ")
+        self.api_inflight += 1
+        self.max_api_inflight = max(self.max_api_inflight, self.api_inflight)
+        try:
+            await asyncio.sleep(self.api_delay)
+        finally:
+            self.api_inflight -= 1
         if path == "/v2/workers" and request.method == "POST":
             self.registrations_inflight += 1
             self.max_registrations_inflight = max(

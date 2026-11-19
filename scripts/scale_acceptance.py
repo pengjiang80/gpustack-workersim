@@ -67,7 +67,11 @@ def main():
     auth = "Basic " + base64.b64encode(f"admin:{password}".encode()).decode()
     credentials = [password]
     process = None
-    report = {"workersim_version": __version__, "gpustack_version": TARGET_VERSION}
+    report = {
+        "workersim_version": __version__, "gpustack_version": TARGET_VERSION,
+        "request_concurrency": 16, "registration_concurrency": 8,
+        "registration_rate": 10, "host_cpu_count": os.cpu_count(),
+    }
     with tempfile.TemporaryDirectory(prefix="workersim-scale-") as temp:
         private = Path(temp)
         server_config = private / "server.json"
@@ -176,6 +180,12 @@ def main():
             )
             report["status"] = "passed"
         finally:
+            try:
+                report["server_container_stats"] = docker(
+                    "stats", "--no-stream", "--format", "{{json .}}", name
+                )
+            except subprocess.CalledProcessError:
+                pass
             if process is not None and process.poll() is None:
                 process.terminate()
                 try:

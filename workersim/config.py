@@ -82,6 +82,7 @@ class ServerConfig:
     cluster_id: int | None = None
     verify_ssl: bool = True
     request_timeout: float = 20
+    request_concurrency: int = 16
     allow_version_mismatch: bool = False
 
 
@@ -187,6 +188,10 @@ class Config:
             raise ValueError("simulation.model_requests_per_second must be finite and nonnegative")
         if self.server.request_timeout <= 0:
             raise ValueError("server.request_timeout must be positive")
+        if type(self.server.request_concurrency) is not int or not (
+            1 <= self.server.request_concurrency <= MAX_WORKERS
+        ):
+            raise ValueError(f"server.request_concurrency must be 1..{MAX_WORKERS}")
         concurrency = self.simulation.registration_concurrency
         if type(concurrency) is not int or not 1 <= concurrency <= MAX_WORKERS:
             raise ValueError(f"simulation.registration_concurrency must be 1..{MAX_WORKERS}")

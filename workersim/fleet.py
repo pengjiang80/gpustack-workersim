@@ -30,6 +30,7 @@ class Fleet:
         self.stop = asyncio.Event()
         self.failure = None
         self.connector = None
+        self.request_slots = asyncio.Semaphore(config.server.request_concurrency)
         self.pd_catalog = json.loads(files("workersim").joinpath("data/pd_ports.json").read_text())
 
     async def run(self):
