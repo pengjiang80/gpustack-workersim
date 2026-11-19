@@ -1,7 +1,7 @@
 # GPUStack WorkerSim
 
 [![CI](https://github.com/pengjiang80/gpustack-workersim/actions/workflows/ci.yml/badge.svg)](https://github.com/pengjiang80/gpustack-workersim/actions/workflows/ci.yml)
-[![Docker Hub](https://img.shields.io/badge/Docker%20Hub-gpustack%2Fgpustack--workersim-2496ED?logo=docker)](https://hub.docker.com/r/gpustack/gpustack-workersim)
+[![Docker Hub](https://img.shields.io/badge/Docker%20Hub-gpustack%2Fworkersim-2496ED?logo=docker)](https://hub.docker.com/r/gpustack/workersim)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 
 **Test GPUStack scheduling, deployment lifecycles, and monitoring on CPU-only machines.**
@@ -73,13 +73,19 @@ Adjust the count to match the configuration. The helper preserves existing reser
 
 ```bash
 export GPUSTACK_REGISTRATION_TOKEN='<cluster-registration-token>'
-docker pull gpustack/gpustack-workersim:0.1.1
+docker pull gpustack/workersim:0.1.1
 docker compose up -d --no-build
 docker compose logs -f workersim
 docker compose exec workersim workersim --config /config/fleet.yaml status
 ```
 
 Compose enables automatic restart, persistent identity storage, host networking, and a file-descriptor limit of 65536. The **linux/amd64** image runs as UID **10001**, without privileged mode or a Docker socket mount.
+
+Docker images are published at [`gpustack/workersim`](https://hub.docker.com/r/gpustack/workersim).
+The previous Docker Hub repository was removed. Update existing Compose/image
+references while keeping configuration mounts, identity volumes, container names,
+and explicit port settings. The GitHub repository and Python package remain
+`gpustack-workersim`.
 
 Open the cluster in GPUStack UI. Workers should become **Ready**. Deploy models normally through UI or API; the real Server schedules them and WorkerSim simulates their startup.
 

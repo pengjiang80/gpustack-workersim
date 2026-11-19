@@ -8,8 +8,12 @@ from pathlib import Path
 
 from workersim import TARGET_COMMIT, TARGET_VERSION, __version__
 
+DEFAULT_IMAGE = "gpustack/workersim"
 
-def release_metadata(image, *, event="workflow_dispatch", ref="", update_latest=False):
+
+def release_metadata(
+    image=DEFAULT_IMAGE, *, event="workflow_dispatch", ref="", update_latest=False
+):
     version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
     if version != __version__ or not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise ValueError("Package and runtime versions must match and have three numeric parts")
@@ -37,7 +41,7 @@ def main():
     if not os.environ.get("LOGIN"):
         raise ValueError("Set DOCKERHUB_USERNAME")
     data = release_metadata(
-        os.environ["IMAGE"],
+        os.environ.get("IMAGE") or DEFAULT_IMAGE,
         event=os.environ["EVENT"],
         ref=os.environ["REF"],
         update_latest=os.environ.get("UPDATE_LATEST") == "true",

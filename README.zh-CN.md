@@ -42,13 +42,17 @@ cd gpustack-workersim
 ```bash
 sudo python3 scripts/configure_port_reservations.py --workers 2 --apply
 export GPUSTACK_REGISTRATION_TOKEN='<集群注册Token>'
-docker pull gpustack/gpustack-workersim:0.1.1
+docker pull gpustack/workersim:0.1.1
 docker compose up -d --no-build
 docker compose logs -f workersim
 docker compose exec workersim workersim --config /config/fleet.yaml status
 ```
 
 端口预留的 `--workers` 应与配置数量一致。脚本保留已有设置，不清理已经存在的连接或 TIME_WAIT。Compose 已设置自动重启、持久化 volume 和 `nofile=65536`。**linux/amd64** 镜像以 UID 10001 运行，不需要特权模式或 Docker socket。
+
+Docker 镜像仓库现为 [`gpustack/workersim`](https://hub.docker.com/r/gpustack/workersim)，
+旧 Docker Hub 仓库已删除。已有部署只需更新镜像地址，保留配置挂载、身份 volume、
+容器名和显式端口设置。GitHub 仓库与 Python 包仍名为 `gpustack-workersim`。
 
 在 GPUStack UI 查看节点 Ready 状态，然后照常向测试集群部署模型。
 
