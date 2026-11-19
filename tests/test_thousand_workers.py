@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 import time
 
 import aiohttp
@@ -13,6 +14,7 @@ from workersim.fleet import Fleet
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="1000-Worker scale acceptance targets Linux")
 async def test_thousand_workers_shared_ip(config, control_plane, monkeypatch):
     config.worker_groups = [WorkerGroup(count=1000, gpu_profile="b300-288gb", gpu_count=8)]
     config.network = NetworkConfig(

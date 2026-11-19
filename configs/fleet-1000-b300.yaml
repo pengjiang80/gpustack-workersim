@@ -14,6 +14,7 @@ simulation:
   namespace: workersim-b300-1000
   data_dir: /data
   registration_rate: 10
+  registration_concurrency: 8
   heartbeat_interval: 30
   status_interval: 30
   reconcile_interval: 30

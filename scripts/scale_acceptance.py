@@ -115,12 +115,19 @@ def main():
                 if process.poll() is not None:
                     raise RuntimeError("WorkerSim process exited")
                 workers = call("http://127.0.0.1:20099/status")["workers"]
+                report["last_progress"] = {
+                    "registered": sum(w["registered"] for w in workers),
+                    "watches": sum(
+                        int(w["watch_connected"]) + int(w["file_watch_connected"]) for w in workers
+                    ),
+                }
+                print(json.dumps(report["last_progress"]), flush=True)
                 return workers if len(workers) == args.workers and all(
                     w["registered"] and w["watch_connected"] and w["file_watch_connected"]
                     for w in workers
                 ) else None
 
-            wait_until(fleet_ready)
+            wait_until(fleet_ready, timeout=900)
             report["registered_with_two_watches_seconds"] = round(time.monotonic() - started, 3)
 
             def server_workers():

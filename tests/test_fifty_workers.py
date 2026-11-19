@@ -67,3 +67,24 @@ async def test_independent_workers_and_scale_to_zero(config, control_plane, monk
     finally:
         fleet.stop.set()
         await task
+
+
+@pytest.mark.asyncio
+async def test_registration_backpressure(config, control_plane, monkeypatch):
+    config.worker_groups = [WorkerGroup(count=8)]
+    config.network.api_port_base = 33100
+    config.network.metrics_port_base = 33200
+    config.network.control_port = 33300
+    config.simulation.registration_concurrency = 2
+    config.simulation.registration_rate = 1000
+    config.validate()
+    control_plane.registration_delay = 0.05
+    monkeypatch.setenv("GPUSTACK_REGISTRATION_TOKEN", "registration-secret")
+    fleet = Fleet(config)
+    task = asyncio.create_task(fleet.run())
+    try:
+        await eventually(lambda: len(control_plane.statuses) == 8)
+        assert control_plane.max_registrations_inflight == 2
+    finally:
+        fleet.stop.set()
+        await task

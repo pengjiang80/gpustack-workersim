@@ -6,7 +6,7 @@
 
 **Test GPUStack scheduling, deployment lifecycles, and monitoring on CPU-only machines.**
 
-WorkerSim is a standalone worker protocol simulator for unmodified GPUStack. One process can register up to **1000 independent workers**, expose virtual GPU/NPU inventories, receive assignments from the real scheduler, and report synthetic monitoring data to the standard UI.
+WorkerSim is a standalone worker protocol simulator for unmodified GPUStack. On Linux, one process can register up to **1000 independent workers**, expose virtual GPU/NPU inventories, receive assignments from the real scheduler, and report synthetic monitoring data to the standard UI.
 
 WorkerSim has its own product version. See [Releases](https://github.com/pengjiang80/gpustack-workersim/releases) for the GPUStack version supported by each release; startup checks protocol compatibility.
 
@@ -139,7 +139,7 @@ At 1000 workers, the inference pool spans **40000–59999**. The first worker us
 
 Use distinct service pools for multiple simulator processes on one host. Optional `network.worker_ip_cidr` assigns separate worker IPs; configure host addresses and routing before startup. A Linux test-host helper is available in [`configure_virtual_network.py`](scripts/configure_virtual_network.py).
 
-For 1000 workers, mount `configs/fleet-1000-b300.yaml` as `/config/fleet.yaml` in Compose and reserve ports with `--workers 1000`. Keep `nofile=65536`; every worker needs two listeners and two persistent event connections. The example registers 10 workers/s (about 100 seconds just for pacing), staggers 30-second reports, and shares the HTTP transport while keeping authentication independent. CPU, RAM, and Server load still depend on model count and event volume; 1000-worker capacity is not a guarantee of scheduler throughput.
+For 1000 workers, mount `configs/fleet-1000-b300.yaml` as `/config/fleet.yaml` in Compose and reserve ports with `--workers 1000`. Keep `nofile=65536`; every worker needs two listeners and two persistent event connections. The example allows up to 10 registrations/s (at least 100 seconds just for pacing), limits in-flight starts to 8 with `simulation.registration_concurrency`, staggers 30-second reports, and shares the HTTP transport while keeping authentication independent. A slower Server makes registration take longer; queued starts wait locally before their HTTP timeout begins. CPU, RAM, and Server load still depend on model count and event volume; 1000-worker capacity is not a guarantee of scheduler throughput.
 
 Keep the data directory or Docker volume to preserve identities. Each namespace belongs to one Server URL and has a process lock. Fleet configuration changes require a restart; retain worker names and group order to preserve port assignments.
 

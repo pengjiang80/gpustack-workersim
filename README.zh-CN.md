@@ -4,7 +4,7 @@
 
 **只用 CPU 主机，验证 GPUStack 的节点管理、模型调度、部署生命周期和监控展示。**
 
-WorkerSim 是独立的 **GPUStack Worker 协议模拟器**，无需修改 Server 或 UI。单进程最多管理 **1000 个独立节点**，每个节点拥有自己的身份、心跳、事件订阅、HTTP 接口和监控端口。
+WorkerSim 是独立的 **GPUStack Worker 协议模拟器**，无需修改 Server 或 UI。Linux 下单进程最多管理 **1000 个独立节点**，每个节点拥有自己的身份、心跳、事件订阅、HTTP 接口和监控端口。
 
 WorkerSim 使用独立产品版本。各版本支持的 GPUStack 版本见 [Releases](https://github.com/pengjiang80/gpustack-workersim/releases)，启动时会检查协议兼容性。
 
@@ -104,7 +104,7 @@ worker_groups:
 
 第一个节点使用 `40000–40019`，第 1000 个使用 `59980–59999`。这是模拟器自己的默认分配，不改变 GPUStack Server；只有已分配的模型任务才打开模型监听端口。复杂 PD/分布式布局可能需要更多端口，可增大 `network.instance_port_end`，同时减少单 IP 节点数量或拆分 IP/主机；预留脚本提供 `--ports-per-worker`、`--start-port` 与自定义配置对应。
 
-启动 1000 节点时，在 Compose 中将配置挂载改为 `configs/fleet-1000-b300.yaml:/config/fleet.yaml:ro`，预留端口命令使用 `--workers 1000`，保留 `nofile=65536`。每个节点有两个监听器和两路常驻事件连接；示例每秒注册 10 个节点，光注册节流约需 100 秒，心跳与状态上报按 30 秒错峰发送。底层连接池共享，认证仍独立。实际 CPU、内存和 Server 压力取决于模型数与事件量，节点容量不代表调度吞吐保证。
+启动 1000 节点时，在 Compose 中将配置挂载改为 `configs/fleet-1000-b300.yaml:/config/fleet.yaml:ro`，预留端口命令使用 `--workers 1000`，保留 `nofile=65536`。每个节点有两个监听器和两路常驻事件连接；示例每秒最多发起 10 次注册，光注册节流至少需 100 秒，`simulation.registration_concurrency` 同时将启动并发限制为 8。Server 较慢时，待启动节点先在本地排队，拿到并发名额后才开始 HTTP 超时计时。心跳与状态上报按 30 秒错峰发送，底层连接池共享，认证仍独立。实际 CPU、内存和 Server 压力取决于模型数与事件量，节点容量不代表调度吞吐保证。
 
 同主机多个进程应使用不同端口池。独立 IP 可通过 `network.worker_ip_cidr` 配置，并先准备宿主机地址和路由；可参考 [`configure_virtual_network.py`](scripts/configure_virtual_network.py)。
 

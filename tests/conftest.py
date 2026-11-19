@@ -64,6 +64,9 @@ class ControlPlane:
         self.managed_reports = []
         self.reject_report = None
         self.watch_heartbeat_interval = 0.1
+        self.registration_delay = 0
+        self.registrations_inflight = 0
+        self.max_registrations_inflight = 0
 
     async def handler(self, request):
         path = request.path
@@ -71,6 +74,14 @@ class ControlPlane:
             return web.json_response({"version": "2.3.1", "git_commit": "458030e8"})
         token = request.headers.get("Authorization", "").removeprefix("Bearer ")
         if path == "/v2/workers" and request.method == "POST":
+            self.registrations_inflight += 1
+            self.max_registrations_inflight = max(
+                self.max_registrations_inflight, self.registrations_inflight
+            )
+            try:
+                await asyncio.sleep(self.registration_delay)
+            finally:
+                self.registrations_inflight -= 1
             body = await request.json()
             existing = next((w for w in self.workers.values() if w["name"] == body["name"]), None)
             if existing:

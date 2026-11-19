@@ -120,6 +120,7 @@ class SimulationConfig:
     status_interval: float = 30
     reconcile_interval: float = 10
     registration_rate: float = 5
+    registration_concurrency: int = 8
     download_seconds: float = 1
     startup_seconds: float = 2
     model_requests_per_second: float = 2
@@ -186,6 +187,9 @@ class Config:
             raise ValueError("simulation.model_requests_per_second must be finite and nonnegative")
         if self.server.request_timeout <= 0:
             raise ValueError("server.request_timeout must be positive")
+        concurrency = self.simulation.registration_concurrency
+        if type(concurrency) is not int or not 1 <= concurrency <= MAX_WORKERS:
+            raise ValueError(f"simulation.registration_concurrency must be 1..{MAX_WORKERS}")
         for name in ("advertise_address", "worker_ip"):
             value = getattr(self.network, name)
             if not value or any(c in value for c in "/: \t\n") or value == "0.0.0.0":

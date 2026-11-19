@@ -65,9 +65,13 @@ class Fleet:
                 except (NotImplementedError, RuntimeError):
                     pass
 
+            registration_slots = asyncio.Semaphore(self.config.simulation.registration_concurrency)
+
             async def start(worker):
                 await asyncio.sleep(worker.spec.slot / self.config.simulation.registration_rate)
-                await worker.start(token)
+                # Queue locally before starting the HTTP timeout when the Server falls behind.
+                async with registration_slots:
+                    await worker.start(token)
 
             starters = [asyncio.create_task(start(worker)) for worker in self.workers]
             await asyncio.gather(*starters)

@@ -79,5 +79,5 @@ def main():
     except KeyboardInterrupt:
         pass
     except Exception as error:
-        print(f"workersim: {error}", file=sys.stderr)
+        print(f"workersim: {str(error) or type(error).__name__}", file=sys.stderr)
         raise SystemExit(1) from None
