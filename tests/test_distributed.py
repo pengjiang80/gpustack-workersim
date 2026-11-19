@@ -20,7 +20,7 @@ async def test_native_local_members_and_rank_sources(config, control_plane, monk
     config.network.worker_ip = "127.252.0.1"
     config.network.api_port_base = 33400
     config.network.metrics_port_base = 33500
-    config.network.control_port = 33600
+    config.network.control_port = 30600
     config.network.instance_port_start = 33700
     config.network.instance_port_end = 33763
     config.validate()

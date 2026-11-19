@@ -77,7 +77,8 @@ async def test_registration_backpressure(config, control_plane, monkeypatch):
     config.network.advertise_address = "127.252.0.1"
     config.network.api_port_base = 33100
     config.network.metrics_port_base = 33200
-    config.network.control_port = 33300
+    # Control binds 127.0.0.1: keep it below Linux's ephemeral source-port range.
+    config.network.control_port = 30300
     config.simulation.registration_concurrency = 2
     config.simulation.registration_rate = 1000
     config.validate()

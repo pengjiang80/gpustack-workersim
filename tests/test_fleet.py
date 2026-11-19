@@ -136,7 +136,7 @@ async def test_native_port_blocks_and_per_ip_reuse(config, control_plane, monkey
     config.network.advertise_address = "127.252.0.1"
     config.network.api_port_base = 33100
     config.network.metrics_port_base = 33200
-    config.network.control_port = 33300
+    config.network.control_port = 30300
     config.network.worker_ip_cidr = cidr
     config.network.instance_port_start = 40000
     config.network.instance_port_end = 40063
