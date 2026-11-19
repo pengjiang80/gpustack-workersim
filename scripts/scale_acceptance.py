@@ -160,6 +160,10 @@ def main():
                 int(w["watch_connected"]) + int(w["file_watch_connected"]) for w in summaries
             )
             report["report_errors"] = sum(w["report_errors"] for w in summaries)
+            report["worker_process_rss_kib"] = int(
+                next(line.split()[1] for line in Path(f"/proc/{process.pid}/status").read_text()
+                     .splitlines() if line.startswith("VmRSS:"))
+            )
             report["server_container_stats"] = docker(
                 "stats", "--no-stream", "--format", "{{json .}}", name
             )

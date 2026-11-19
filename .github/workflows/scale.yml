@@ -2,6 +2,8 @@ name: Original Server scale acceptance
 
 on:
   workflow_dispatch:
+  push:
+    branches: ['codex/scale-acceptance']
 
 permissions:
   contents: read
