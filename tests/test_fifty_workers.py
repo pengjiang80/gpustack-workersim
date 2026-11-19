@@ -72,6 +72,9 @@ async def test_independent_workers_and_scale_to_zero(config, control_plane, monk
 @pytest.mark.asyncio
 async def test_registration_backpressure(config, control_plane, monkeypatch):
     config.worker_groups = [WorkerGroup(count=8)]
+    config.network.bind_host = "127.252.0.1"
+    config.network.worker_ip = "127.252.0.1"
+    config.network.advertise_address = "127.252.0.1"
     config.network.api_port_base = 33100
     config.network.metrics_port_base = 33200
     config.network.control_port = 33300

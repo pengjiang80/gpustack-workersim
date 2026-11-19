@@ -197,6 +197,13 @@ def main():
                 logs = docker("logs", name)
             except subprocess.CalledProcessError:
                 logs = "Server container was not created"
+            identities = private / "state" / name / "identities.json"
+            if identities.exists():
+                for identity in json.loads(identities.read_text())["workers"].values():
+                    credentials.extend(
+                        identity[key]
+                        for key in ("token", "registration_token") if identity.get(key)
+                    )
             for credential in credentials:
                 logs = logs.replace(credential, "[redacted]")
             # Server startup can include private generated credentials unrelated to our test keys.
