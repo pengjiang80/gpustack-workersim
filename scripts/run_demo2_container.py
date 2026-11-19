@@ -7,7 +7,7 @@ from pathlib import Path
 
 DIRECTORY = Path("/opt/gpustack-workersim-demo2")
 NAME = "gpustack-workersim-demo2"
-IMAGE = "gpustack-workersim:0.4.4"
+IMAGE = "gpustack/workersim:0.1.1"
 
 
 def docker(*args, check=True):
@@ -17,8 +17,9 @@ def docker(*args, check=True):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--replace", action="store_true", help="Reload a changed fleet config")
+    parser.add_argument("--image", default=IMAGE, help="Pre-pulled image tag or immutable digest")
     args = parser.parse_args()
-    image_id = json.loads(docker("image", "inspect", IMAGE).stdout)[0]["Id"]
+    image_id = json.loads(docker("image", "inspect", args.image).stdout)[0]["Id"]
     old = docker("inspect", NAME, check=False)
     rollback = None
     if old.returncode == 0:
@@ -52,7 +53,7 @@ def main():
             f"{DIRECTORY}/fleet.yaml:/config/fleet.yaml:ro",
             "-v",
             f"{DIRECTORY}/data:/data",
-            IMAGE,
+            args.image,
         )
     except subprocess.CalledProcessError:
         if rollback:
