@@ -3,13 +3,42 @@ name: Original Server scale acceptance
 on:
   workflow_dispatch:
   push:
-    branches: ['codex/scale-acceptance']
+    branches: ['codex/scale-acceptance', 'codex/native-source-audit']
 
 permissions:
   contents: read
 
 jobs:
+  source-audit:
+    if: github.ref_name == 'codex/native-source-audit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Pull image and inspect Worker sources
+        run: |
+          docker pull gpustack/gpustack:v2.3.1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from scripts.audit_worker_image import audit_image
+          output = Path('outputs/native-source')
+          output.mkdir(parents=True, exist_ok=True)
+          print(json.dumps(audit_image('gpustack/gpustack:v2.3.1', output), indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-source-audit
+          path: outputs/native-source/
+
   scale:
+    if: github.ref_name != 'codex/native-source-audit'
     name: ${{ matrix.workers }} native Workers
     runs-on: ubuntu-latest
     timeout-minutes: 25
