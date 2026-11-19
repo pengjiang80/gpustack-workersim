@@ -1,0 +1,241 @@
+{
+  "date": "2026-11-19",
+  "workersim_version": "0.1.0",
+  "server_image": "gpustack/gpustack:v2.3.1",
+  "server_image_digest": "sha256:2573799fd23f9973838323e93ca0c23b41ea29b8fd8a28bdb1f12ba93c5d0f6a",
+  "native_timing": {
+    "heartbeat_seconds": 30,
+    "status_seconds": 30,
+    "runtime_metrics_seconds": 3,
+    "watches_per_worker": 6
+  },
+  "fleet_wide_rest_limit": false,
+  "shared_worker_connection_pool": false,
+  "cases": [
+    {
+      "workersim_version": "0.1.0",
+      "gpustack_version": "2.3.1",
+      "communication": "native",
+      "watches_per_worker": 6,
+      "registration_concurrency": 8,
+      "registration_rate": 10,
+      "host_cpu_count": 4,
+      "db_pool_size": 80,
+      "db_max_overflow": 10,
+      "db_pool_timeout": 120,
+      "actual_server_version": {
+        "version": "v2.3.1",
+        "git_commit": "458030e"
+      },
+      "last_progress": {
+        "registered": 500,
+        "watches": 3000
+      },
+      "registered_with_six_watches_seconds": 482.353,
+      "server_ready_seconds": 786.86,
+      "ready_workers": 500,
+      "gpu_devices": 4000,
+      "active_watches": 3000,
+      "report_errors": 1880,
+      "worker_process_rss_kib": 365772,
+      "status": "passed",
+      "name": "github-500-baseline",
+      "source_commit": "034358f563eae72e19764079142dfbeeed53eb52",
+      "failed_stage": null,
+      "clean_stability_acceptance": false,
+      "workflow_url": "https://github.com/pengjiang80/gpustack-workersim/actions/runs/44464421352",
+      "replicas": {
+        "target": "GPUStack 2.3.1",
+        "simulated_inference": true,
+        "phases": [
+          {
+            "replicas": 2,
+            "elapsed_seconds": 108.596,
+            "instance_ids": [
+              2,
+              1
+            ],
+            "worker_ids": [
+              17,
+              21
+            ]
+          },
+          {
+            "replicas": 1,
+            "elapsed_seconds": 28.409,
+            "instance_ids": [
+              2
+            ],
+            "worker_ids": [
+              21
+            ]
+          },
+          {
+            "replicas": 0,
+            "elapsed_seconds": 20.474,
+            "instance_ids": [],
+            "worker_ids": []
+          }
+        ],
+        "deleted": true,
+        "model_id": 1,
+        "status": "passed"
+      }
+    },
+    {
+      "workersim_version": "0.1.0",
+      "gpustack_version": "2.3.1",
+      "communication": "native",
+      "watches_per_worker": 6,
+      "registration_concurrency": 8,
+      "registration_rate": 10,
+      "host_cpu_count": 4,
+      "db_pool_size": 80,
+      "db_max_overflow": 10,
+      "db_pool_timeout": 120,
+      "actual_server_version": {
+        "version": "v2.3.1",
+        "git_commit": "458030e"
+      },
+      "last_progress": {
+        "registered": 500,
+        "watches": 3000
+      },
+      "registered_with_six_watches_seconds": 472.531,
+      "status": "failed",
+      "name": "github-500-current",
+      "source_commit": "61d9c8cbb8bf94877200b28cc2d0c9af82e03c42",
+      "failed_stage": "all_workers_ready",
+      "clean_stability_acceptance": false,
+      "workflow_url": "https://github.com/pengjiang80/gpustack-workersim/actions/runs/44466149407"
+    },
+    {
+      "workersim_version": "0.1.0",
+      "gpustack_version": "2.3.1",
+      "communication": "native",
+      "watches_per_worker": 6,
+      "registration_concurrency": 8,
+      "registration_rate": 10,
+      "host_cpu_count": 4,
+      "db_pool_size": 80,
+      "db_max_overflow": 10,
+      "db_pool_timeout": 120,
+      "actual_server_version": {
+        "version": "v2.3.1",
+        "git_commit": "458030e"
+      },
+      "last_progress": {
+        "registered": 669,
+        "watches": 3972
+      },
+      "status": "failed",
+      "name": "github-1000-current",
+      "source_commit": "61d9c8cbb8bf94877200b28cc2d0c9af82e03c42",
+      "failed_stage": "startup_http_read_timeout",
+      "clean_stability_acceptance": false,
+      "workflow_url": "https://github.com/pengjiang80/gpustack-workersim/actions/runs/44466149407"
+    },
+    {
+      "workersim_version": "0.1.0",
+      "gpustack_version": "2.3.1",
+      "communication": "native",
+      "watches_per_worker": 6,
+      "registration_concurrency": 8,
+      "registration_rate": 10,
+      "host_cpu_count": 8,
+      "db_pool_size": 384,
+      "db_max_overflow": 128,
+      "db_pool_timeout": 120,
+      "external_postgres": true,
+      "postgres_max_connections": 768,
+      "actual_server_version": {
+        "version": "v2.3.1",
+        "git_commit": "458030e"
+      },
+      "last_progress": {
+        "registered": 500,
+        "watches": 3000
+      },
+      "registered_with_six_watches_seconds": 718.189,
+      "status": "failed",
+      "name": "vultr-500-expanded-database",
+      "source_commit": "6d8fb20e7187664ce4502b6e178c289c7b1c4318",
+      "failed_stage": "all_workers_ready",
+      "clean_stability_acceptance": false,
+      "failure": "TimeoutError: Acceptance condition did not converge",
+      "late_snapshot": {
+        "observed_at": "2026-11-19T06:32:25.723629+00:00",
+        "registered": 500,
+        "watches": 3000,
+        "report_errors": 130,
+        "last_errors": {
+          "None": 370,
+          "Timeout on reading data from socket": 130
+        },
+        "server_states": [
+          {
+            "state": "READY",
+            "count": 500,
+            "reason": null
+          }
+        ]
+      },
+      "database_activity": [
+        {
+          "state": null,
+          "wait_type": "Activity",
+          "wait_event": "BgWriterHibernate",
+          "count": 1
+        },
+        {
+          "state": null,
+          "wait_type": "Activity",
+          "wait_event": "WalWriterMain",
+          "count": 1
+        },
+        {
+          "state": null,
+          "wait_type": "Activity",
+          "wait_event": "LogicalLauncherMain",
+          "count": 1
+        },
+        {
+          "state": "idle in transaction",
+          "wait_type": "Client",
+          "wait_event": "ClientRead",
+          "count": 314
+        },
+        {
+          "state": null,
+          "wait_type": "Activity",
+          "wait_event": "CheckpointerMain",
+          "count": 1
+        },
+        {
+          "state": "active",
+          "wait_type": null,
+          "wait_event": null,
+          "count": 1
+        },
+        {
+          "state": null,
+          "wait_type": "Activity",
+          "wait_event": "AutoVacuumMain",
+          "count": 1
+        },
+        {
+          "state": "idle",
+          "wait_type": "Client",
+          "wait_event": "ClientRead",
+          "count": 90
+        }
+      ],
+      "replica_scenario_executed": false,
+      "server_stats": {
+        "CPUPerc": "141.60%",
+        "MemUsage": "7.054GiB / 15.61GiB",
+        "NetIO": "4.44GB / 693MB"
+      }
+    }
+  ]
+}

@@ -15,6 +15,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from collections import Counter
 from pathlib import Path
 
 import yaml
@@ -93,6 +94,7 @@ def main():
         }))
         server_config.chmod(0o600)
         try:
+            report["stage"] = "source_audit"
             report["worker_source_audit"] = audit_image(
                 f"gpustack/gpustack:v{TARGET_VERSION}", output
             )
@@ -139,6 +141,7 @@ def main():
                 "--config-file", "/config/server.json", "--disable-update-check",
             )
             report["actual_server_version"] = wait_until(lambda: call(base + "/version"))
+            report["stage"] = "registration_and_watches"
 
             def admin(method, path, body=None):
                 return call(base + "/v2" + path, method=method, body=body, auth=auth)
@@ -173,6 +176,7 @@ def main():
                 report["last_progress"] = {
                     "registered": sum(w["registered"] for w in workers),
                     "watches": sum(sum(w["watch_states"].values()) for w in workers),
+                    "report_errors": sum(w["report_errors"] for w in workers),
                 }
                 print(json.dumps(report["last_progress"]), flush=True)
                 return workers if len(workers) == args.workers and all(
@@ -182,6 +186,7 @@ def main():
 
             wait_until(fleet_ready, timeout=900)
             report["registered_with_six_watches_seconds"] = round(time.monotonic() - started, 3)
+            report["stage"] = "all_workers_ready"
 
             def server_workers():
                 workers, page = [], 1
@@ -194,6 +199,7 @@ def main():
 
             def all_ready():
                 workers = server_workers()
+                report["last_server_states"] = dict(Counter(w["state"] for w in workers))
                 return workers if len(workers) == args.workers and all(
                     w["state"] == "ready" for w in workers
                 ) else None
@@ -204,12 +210,14 @@ def main():
             report["gpu_devices"] = sum(len(w["status"]["gpu_devices"]) for w in workers)
             assert report["gpu_devices"] == args.workers * 8
             # Observe another heartbeat/status cycle, then verify native API and scrape endpoints.
+            report["stage"] = "heartbeat_soak"
             time.sleep(35)
             assert all_ready()
             for slot in (0, args.workers - 1):
                 assert call(f"http://127.0.0.1:{20100 + slot}/healthz")["status"] == "ok"
                 with urllib.request.urlopen(f"http://127.0.0.1:{21100 + slot}/metrics") as response:
                     assert b"worker_node_gpu_info" in response.read()
+            report["stage"] = "replicas_2_1_0"
             subprocess.run([
                 *command, "scenario", "--replicas", "2", "1", "0", "--timeout", "180",
                 "--output", str(output / "replicas.json"),
@@ -226,6 +234,10 @@ def main():
                 "stats", "--no-stream", "--format", "{{json .}}", name
             )
             report["status"] = "passed"
+            report["stage"] = "complete"
+        except Exception as error:
+            report["error"] = type(error).__name__
+            raise
         finally:
             try:
                 report["server_container_stats"] = docker(
