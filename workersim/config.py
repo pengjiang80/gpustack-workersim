@@ -81,8 +81,7 @@ class ServerConfig:
     api_key_env: str = "GPUSTACK_API_KEY"
     cluster_id: int | None = None
     verify_ssl: bool = True
-    request_timeout: float = 20
-    request_concurrency: int = 16
+    request_timeout: float = 60
     allow_version_mismatch: bool = False
 
 
@@ -119,7 +118,8 @@ class SimulationConfig:
     seed: int = 42
     heartbeat_interval: float = 30
     status_interval: float = 30
-    reconcile_interval: float = 10
+    reconcile_interval: float = 0
+    model_state_interval: float = 3
     registration_rate: float = 5
     registration_concurrency: int = 8
     download_seconds: float = 1
@@ -176,8 +176,8 @@ class Config:
         for name in (
             "heartbeat_interval",
             "status_interval",
-            "reconcile_interval",
             "registration_rate",
+            "model_state_interval",
         ):
             if getattr(self.simulation, name) <= 0:
                 raise ValueError(f"simulation.{name} must be positive")
@@ -188,10 +188,8 @@ class Config:
             raise ValueError("simulation.model_requests_per_second must be finite and nonnegative")
         if self.server.request_timeout <= 0:
             raise ValueError("server.request_timeout must be positive")
-        if type(self.server.request_concurrency) is not int or not (
-            1 <= self.server.request_concurrency <= MAX_WORKERS
-        ):
-            raise ValueError(f"server.request_concurrency must be 1..{MAX_WORKERS}")
+        if self.simulation.reconcile_interval < 0:
+            raise ValueError("simulation.reconcile_interval must be nonnegative")
         concurrency = self.simulation.registration_concurrency
         if type(concurrency) is not int or not 1 <= concurrency <= MAX_WORKERS:
             raise ValueError(f"simulation.registration_concurrency must be 1..{MAX_WORKERS}")

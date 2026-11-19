@@ -219,9 +219,11 @@ class Runtime:
     async def load_model(self, record):
         # The snapshot is immutable for a generation; fetch the role definitions once.
         try:
-            model = await self.worker.client.request(
-                "GET", f"/models/{record.instance['model_id']}"
-            )
+            model = self.worker.watch_caches["models"].get(record.instance["model_id"])
+            if model is None:
+                model = await self.worker.client.request(
+                    "GET", f"/models/{record.instance['model_id']}"
+                )
         except APIError as error:
             if error.status != 404:
                 raise
@@ -387,7 +389,7 @@ class Runtime:
                     fenced=True,
                 )
             record.phase = "stopped"
-            record.due = time.monotonic() + self.worker.config.simulation.reconcile_interval
+            record.due = time.monotonic() + self.worker.config.simulation.model_state_interval
             return
         if instance.get("state") == "error":
             await self.release(record)
@@ -416,7 +418,8 @@ class Runtime:
                 # current()/report() still fence owner, generation and stop barriers.
                 if not self.worker.model_files.pending_for(instance):
                     await self.report(record, {"state": "running", "state_message": None})
-                record.due = time.monotonic() + self.worker.config.simulation.reconcile_interval
+                record.due = time.monotonic() + self.worker.config.simulation.model_state_interval
+            record.due = time.monotonic() + self.worker.config.simulation.model_state_interval
             return
         if record.phase in ("stopped", "error"):
             return
@@ -456,7 +459,7 @@ class Runtime:
                 # generation-checked report. Never bypass ModelFile readiness.
                 if not await self.report(record, {"state": "initializing"}):
                     return
-                record.due = time.monotonic() + self.worker.config.simulation.reconcile_interval
+                record.due = time.monotonic() + self.worker.config.simulation.model_state_interval
                 return
             if self.worker.model_files.pending_for(instance):
                 return

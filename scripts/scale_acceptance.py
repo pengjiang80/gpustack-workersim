@@ -21,6 +21,8 @@ import yaml
 
 from workersim import TARGET_VERSION, __version__
 
+from .audit_worker_image import audit_image
+
 
 def docker(*args):
     return subprocess.check_output(["docker", *args], text=True, stderr=subprocess.STDOUT).strip()
@@ -56,6 +58,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workers", type=int, default=1000)
     parser.add_argument("--output", default="outputs/scale-acceptance")
+    parser.add_argument("--db-pool-size", type=int, default=80)
+    parser.add_argument("--db-max-overflow", type=int, default=10)
+    parser.add_argument("--db-pool-timeout", type=int, default=120)
     args = parser.parse_args()
     if not 1 <= args.workers <= 1000:
         raise ValueError("Worker count must be 1..1000")
@@ -69,8 +74,10 @@ def main():
     process = None
     report = {
         "workersim_version": __version__, "gpustack_version": TARGET_VERSION,
-        "request_concurrency": 16, "registration_concurrency": 8,
+        "communication": "native", "watches_per_worker": 6, "registration_concurrency": 8,
         "registration_rate": 10, "host_cpu_count": os.cpu_count(),
+        "db_pool_size": args.db_pool_size, "db_max_overflow": args.db_max_overflow,
+        "db_pool_timeout": args.db_pool_timeout,
     }
     with tempfile.TemporaryDirectory(prefix="workersim-scale-") as temp:
         private = Path(temp)
@@ -80,14 +87,20 @@ def main():
         }))
         server_config.chmod(0o600)
         try:
+            report["worker_source_audit"] = audit_image(
+                f"gpustack/gpustack:v{TARGET_VERSION}", output
+            )
             docker(
                 "run", "-d", "--name", name, "--ulimit", "nofile=65536:65536",
                 "-p", "127.0.0.1:18080:80", "-v", f"{name}:/var/lib/gpustack",
                 "-v", f"{server_config}:/config/server.json:ro",
+                "-e", f"GPUSTACK_DB_POOL_SIZE={args.db_pool_size}",
+                "-e", f"GPUSTACK_DB_MAX_OVERFLOW={args.db_max_overflow}",
+                "-e", f"GPUSTACK_DB_POOL_TIMEOUT={args.db_pool_timeout}",
                 f"gpustack/gpustack:v{TARGET_VERSION}",
                 "--config-file", "/config/server.json", "--disable-update-check",
             )
-            wait_until(lambda: call(base + "/version"))
+            report["actual_server_version"] = wait_until(lambda: call(base + "/version"))
 
             def admin(method, path, body=None):
                 return call(base + "/v2" + path, method=method, body=body, auth=auth)
@@ -121,18 +134,16 @@ def main():
                 workers = call("http://127.0.0.1:20099/status")["workers"]
                 report["last_progress"] = {
                     "registered": sum(w["registered"] for w in workers),
-                    "watches": sum(
-                        int(w["watch_connected"]) + int(w["file_watch_connected"]) for w in workers
-                    ),
+                    "watches": sum(sum(w["watch_states"].values()) for w in workers),
                 }
                 print(json.dumps(report["last_progress"]), flush=True)
                 return workers if len(workers) == args.workers and all(
-                    w["registered"] and w["watch_connected"] and w["file_watch_connected"]
+                    w["registered"] and all(w["watch_states"].values())
                     for w in workers
                 ) else None
 
             wait_until(fleet_ready, timeout=900)
-            report["registered_with_two_watches_seconds"] = round(time.monotonic() - started, 3)
+            report["registered_with_six_watches_seconds"] = round(time.monotonic() - started, 3)
 
             def server_workers():
                 workers, page = [], 1
@@ -167,9 +178,7 @@ def main():
             ], env=env, check=True, stdout=subprocess.DEVNULL)
             summaries = fleet_ready()
             assert summaries
-            report["active_watches"] = sum(
-                int(w["watch_connected"]) + int(w["file_watch_connected"]) for w in summaries
-            )
+            report["active_watches"] = sum(sum(w["watch_states"].values()) for w in summaries)
             report["report_errors"] = sum(w["report_errors"] for w in summaries)
             report["worker_process_rss_kib"] = int(
                 next(line.split()[1] for line in Path(f"/proc/{process.pid}/status").read_text()

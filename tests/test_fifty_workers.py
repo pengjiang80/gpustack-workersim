@@ -34,7 +34,7 @@ async def test_independent_workers_and_scale_to_zero(config, control_plane, monk
     task = asyncio.create_task(fleet.run())
     try:
         await eventually(lambda: len(control_plane.statuses) == count, timeout=15)
-        await eventually(lambda: len(control_plane.watchers) == count * 2, timeout=15)
+        await eventually(lambda: len(control_plane.watchers) == count * 6, timeout=15)
         assert len({w.identity["token"] for w in fleet.workers}) == count
         assert len({w.identity["worker_uuid"] for w in fleet.workers}) == count
         if count == 100:
@@ -80,7 +80,6 @@ async def test_registration_backpressure(config, control_plane, monkeypatch):
     config.network.control_port = 33300
     config.simulation.registration_concurrency = 2
     config.simulation.registration_rate = 1000
-    config.server.request_concurrency = 2
     config.validate()
     control_plane.registration_delay = 0.05
     control_plane.api_delay = 0.02
@@ -90,8 +89,7 @@ async def test_registration_backpressure(config, control_plane, monkeypatch):
     try:
         await eventually(lambda: len(control_plane.statuses) == 8)
         assert control_plane.max_registrations_inflight == 2
-        await eventually(lambda: len(control_plane.watchers) == 16)
-        assert control_plane.max_api_inflight == 2
+        await eventually(lambda: len(control_plane.watchers) == 48)
     finally:
         fleet.stop.set()
         await task

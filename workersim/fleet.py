@@ -7,10 +7,10 @@ import os
 import signal
 from importlib.resources import files
 
-from aiohttp import TCPConnector, web
+from aiohttp import web
 
 from workersim import TARGET_VERSION, __version__
-from workersim.client import Client, cancel_tasks
+from workersim.client import cancel_tasks
 from workersim.http_server import listen
 from workersim.state import StateStore
 from workersim.worker import VirtualWorker
@@ -29,8 +29,6 @@ class Fleet:
         self.logical_ports = {}
         self.stop = asyncio.Event()
         self.failure = None
-        self.connector = None
-        self.request_slots = asyncio.Semaphore(config.server.request_concurrency)
         self.pd_catalog = json.loads(files("workersim").joinpath("data/pd_ports.json").read_text())
 
     async def run(self):
@@ -38,23 +36,9 @@ class Fleet:
         control = None
         starters = []
         try:
-            # Two persistent watches per Worker, plus a bounded pool for ordinary requests.
-            # Share sockets, never session authentication, to avoid thousands of idle pools.
-            self.connector = TCPConnector(
-                ssl=self.config.server.verify_ssl,
-                limit=2 * len(self.config.workers()) + 128,
-            )
             token = os.environ.get(self.config.server.registration_token_env, "")
             if not token and not self.store.workers:
                 raise ValueError(f"Set {self.config.server.registration_token_env} before starting")
-            probe = await Client(self.config.server, token).open()
-            try:
-                version = await probe.request("GET", "/version", root=True)
-            finally:
-                await probe.close()
-            actual = str(version.get("version", "")).removeprefix("v")
-            if actual != TARGET_VERSION and not self.config.server.allow_version_mismatch:
-                raise ValueError(f"Expected GPUStack {TARGET_VERSION}, received {actual!r}")
             self.workers = [VirtualWorker(self, spec) for spec in self.config.workers()]
             control = await listen(
                 self.control_app(), "127.0.0.1", self.config.network.control_port
@@ -88,8 +72,6 @@ class Fleet:
             await cancel_tasks(starters)
             for worker in self.workers:
                 await worker.close()
-            if self.connector:
-                await self.connector.close()
             if control:
                 await control.cleanup()
             self.store.close()

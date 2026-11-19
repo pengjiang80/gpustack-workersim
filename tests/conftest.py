@@ -26,7 +26,9 @@ def free_port():
 
 
 @pytest.fixture
-def config(tmp_path):
+def config(tmp_path, monkeypatch):
+    monkeypatch.setattr("workersim.worker.REGISTER_RETRY_SECONDS", 0.01)
+    monkeypatch.setattr("workersim.worker.WATCH_RECONNECT_SECONDS", 0.05)
     config = Config(
         network=NetworkConfig(
             api_port_base=free_port(),
@@ -41,6 +43,7 @@ def config(tmp_path):
             heartbeat_interval=0.1,
             status_interval=0.1,
             reconcile_interval=0.2,
+            model_state_interval=0.1,
             download_seconds=0.01,
             startup_seconds=0.01,
             registration_rate=500,
@@ -61,6 +64,8 @@ class ControlPlane:
         self.statuses = {}
         self.heartbeats = {}
         self.requests = []
+        self.request_times = []
+        self.version_requests = 0
         self.managed_reports = []
         self.reject_report = None
         self.watch_heartbeat_interval = 0.1
@@ -74,6 +79,7 @@ class ControlPlane:
     async def handler(self, request):
         path = request.path
         if path == "/version":
+            self.version_requests += 1
             return web.json_response({"version": "2.3.1", "git_commit": "458030e8"})
         token = request.headers.get("Authorization", "").removeprefix("Bearer ")
         self.api_inflight += 1
@@ -112,17 +118,35 @@ class ControlPlane:
             raise web.HTTPUnauthorized()
         worker_id = worker["id"]
         self.requests.append((worker_id, request.method, path))
+        self.request_times.append((
+            worker_id, request.method, path, dict(request.query), asyncio.get_running_loop().time()
+        ))
+        if path == "/v2/workers" and request.method == "GET":
+            assert request.query.get("me") == "true"
+            return web.json_response({"items": [worker | {"me": True}]})
+        if path == f"/v2/workers/{worker_id}":
+            return web.json_response(worker | {"me": True})
+        if path == "/v2/inference-backends/all":
+            return web.json_response([])
+        if path == "/v2/cache-providers":
+            return web.json_response({"items": []})
+        if path == "/v2/metrics/config":
+            return web.json_response({})
         if path == "/v2/worker-status":
             self.statuses[worker_id] = await request.json()
             return web.Response(status=204)
         if path == "/v2/worker-heartbeat":
             self.heartbeats[worker_id] = self.heartbeats.get(worker_id, 0) + 1
             return web.Response(status=204)
-        resource = "model-files" if path.startswith("/v2/model-files") else "model-instances"
-        rows = self.files if resource == "model-files" else self.instances
+        resource = path.split("/")[2]
+        resources = {
+            "model-files": self.files, "model-instances": self.instances, "models": self.models,
+            "inference-backends": {}, "benchmarks": {}, "cache-service-instances": {},
+        }
+        rows = resources.get(resource, {})
         if path.startswith("/v2/models/"):
             return web.json_response(self.models.get(int(path.split("/")[3]), {"backend": "vLLM"}))
-        if path in ("/v2/model-instances", "/v2/model-files"):
+        if path in {"/v2/" + name for name in resources}:
             if request.query.get("watch") == "true":
                 queue = asyncio.Queue()
                 self.watchers[(worker_id, resource)] = queue

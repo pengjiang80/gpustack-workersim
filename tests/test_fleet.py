@@ -17,7 +17,7 @@ async def test_deploy_metrics_scale_down_and_restore_identity(
     task = asyncio.create_task(fleet.run())
     try:
         await eventually(lambda: fleet.workers and fleet.workers[0].client)
-        await eventually(lambda: len(control_plane.watchers) == 2)
+        await eventually(lambda: len(control_plane.watchers) == 6)
         instance = await control_plane.assign(managed=managed)
         await eventually(lambda: control_plane.instances[10]["state"] == "running")
         worker = fleet.workers[0]

@@ -41,7 +41,8 @@ def test_thousand_b300_configuration_and_port_limits():
 
 
 @pytest.mark.parametrize(
-    "change", ["duplicate_names", "overlap", "too_many", "zero_interval", "request_concurrency"]
+    "change",
+    ["duplicate_names", "overlap", "too_many", "zero_interval", "registration_concurrency"]
 )
 def test_invalid_configuration(config, change):
     if change == "duplicate_names":
@@ -50,8 +51,8 @@ def test_invalid_configuration(config, change):
         config.network.metrics_port_base = config.network.api_port_base
     elif change == "too_many":
         config.worker_groups[0].count = MAX_WORKERS + 1
-    elif change == "request_concurrency":
-        config.server.request_concurrency = 0
+    elif change == "registration_concurrency":
+        config.simulation.registration_concurrency = 0
     else:
         config.simulation.status_interval = 0
     with pytest.raises(ValueError):

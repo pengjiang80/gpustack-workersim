@@ -16,7 +16,7 @@ WorkerSim 使用独立产品版本。各版本支持的 GPUStack 版本见 [Rele
 - 配置节点数量、GPU/NPU 型号、卡数、CPU、内存、磁盘和标签。
 - 接收真实调度结果，上报初始化、启动、运行、失败和停止状态。
 - 支持普通副本、跨 Worker、PD 分离及已验证的 vLLM/SGLang 编排布局。
-- 独立订阅模型实例与模型文件事件，提供断线重连、完整分页同步及缩容清理。
+- 按原生通信方式保持每节点 6 路 watch、独立连接池、心跳/状态周期、缓存、重连重放及权威回收检查。
 - 模拟文件下载进度、Ready 状态、虚拟路径和合成大小。
 - 上报 GPU 使用与分配、温度、功耗、模型请求与 Token、延迟及部分 KV/PD 指标。
 - 提供模拟聊天、流式聊天、embedding、rerank、语音转写和静音 WAV。
@@ -65,7 +65,7 @@ simulation:
   namespace: workersim-b300
   data_dir: /data
   registration_rate: 2
-  reconcile_interval: 30
+  reconcile_interval: 0
   model_requests_per_second: 2
 worker_groups:
   - name_prefix: sim-b300
@@ -104,9 +104,11 @@ worker_groups:
 
 第一个节点使用 `40000–40019`，第 1000 个使用 `59980–59999`。这是模拟器自己的默认分配，不改变 GPUStack Server；只有已分配的模型任务才打开模型监听端口。复杂 PD/分布式布局可能需要更多端口，可增大 `network.instance_port_end`，同时减少单 IP 节点数量或拆分 IP/主机；预留脚本提供 `--ports-per-worker`、`--start-port` 与自定义配置对应。
 
-启动 1000 节点时，在 Compose 中将配置挂载改为 `configs/fleet-1000-b300.yaml:/config/fleet.yaml:ro`，预留端口命令使用 `--workers 1000`，保留 `nofile=65536`。每个节点有两个监听器和两路常驻事件连接；示例每秒最多发起 10 次注册，光注册节流至少需 100 秒，`simulation.registration_concurrency` 同时将启动并发限制为 8。Server 较慢时，待启动节点先在本地排队，拿到并发名额后才开始 HTTP 超时计时。心跳与状态上报按 30 秒错峰发送，底层连接池共享，认证仍独立。
+启动 1000 节点时，在 Compose 中将配置挂载改为 `configs/fleet-1000-b300.yaml:/config/fleet.yaml:ro`，执行 `sudo python3 scripts/configure_port_reservations.py --workers 1000 --expand-ephemeral-range --apply`，保留 `nofile=65536`。脚本预留 API、监控、控制及模型端口，并显式扩大测试主机的自动源端口范围，为数千路独立出站连接留足空间。
 
-`server.request_concurrency` 将整个 Fleet 的普通 REST 请求和 watch 握手并发默认限制为 **16**，避免瞬时请求挤占 Server 数据库连接池；事件流建立后立即释放名额，2000 路 watch 仍全部保持连接。需要验证更高并发时可主动调大此参数。实际 CPU、内存和 Server 压力取决于模型数与事件量，节点容量不代表调度吞吐保证。
+每节点保持 **6 路常驻 watch** 和独立连接池。心跳与状态启动后立即发送，每次完成后间隔 30 秒；Runtime metrics 保留原生查询 Worker 的周期。不设置跨节点 REST 限流，也不共享连接池来降低 Server 压力。请求、缓存、重连与执行范围见[原生通信说明](docs/native-worker-communication.md)。
+
+示例每秒最多启动 10 个节点，同时启动名额为 8，这两个参数只控制建起 Fleet 的节奏。保留 `reconcile_interval: 0` 使用原生 watch 缓存行为。实际 CPU、内存和 Server/数据库压力取决于模型数与事件量；模拟器支持 1000 节点不代表调度吞吐保证，验收可使用 GPUStack 文档中的数据库池参数调整 Server。
 
 同主机多个进程应使用不同端口池。独立 IP 可通过 `network.worker_ip_cidr` 配置，并先准备宿主机地址和路由；可参考 [`configure_virtual_network.py`](scripts/configure_virtual_network.py)。
 

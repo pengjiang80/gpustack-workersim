@@ -1,7 +1,7 @@
 # WorkerSim and Server share a Linux host; adjust addresses for your Docker network.
 server:
   url: http://127.0.0.1:18080
-  request_timeout: 120
+  request_timeout: 60
 network:
   advertise_address: 172.17.0.1
   worker_ip: 172.17.0.1
@@ -11,7 +11,7 @@ simulation:
   namespace: workersim-b300
   data_dir: /data
   registration_rate: 2
-  reconcile_interval: 30
+  reconcile_interval: 0
 worker_groups:
   - name_prefix: sim-b300
     count: 100

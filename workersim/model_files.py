@@ -75,7 +75,9 @@ class ModelFiles:
             if bucket <= sent:
                 continue
             try:
-                latest = await self.worker.client.request("GET", f"/model-files/{key}")
+                latest = self.worker.watch_caches["model-files"].get(key)
+                if latest is None:
+                    latest = await self.worker.client.request("GET", f"/model-files/{key}")
                 if latest.get("state") != "downloading" or identity(latest) != signature:
                     self.event("UPDATED", latest)
                     continue

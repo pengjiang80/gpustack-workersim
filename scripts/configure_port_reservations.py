@@ -40,25 +40,48 @@ def main():
     parser.add_argument("--workers", type=int, default=100)
     parser.add_argument("--ports-per-worker", type=int, default=20)
     parser.add_argument("--start-port", type=int, default=40000)
+    parser.add_argument("--api-port-base", type=int, default=20100)
+    parser.add_argument("--metrics-port-base", type=int, default=21100)
+    parser.add_argument("--control-port", type=int, default=20099)
+    parser.add_argument("--expand-ephemeral-range", action="store_true")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     low, high = fleet_port_range(args.workers, args.ports_per_worker, args.start_port)
     key = "net.ipv4.ip_local_reserved_ports"
     old = subprocess.check_output(["sysctl", "-n", key], text=True).strip()
     new = merge_ranges(old, low, high)
+    for low, high in (
+        (args.api_port_base, args.api_port_base + args.workers - 1),
+        (args.metrics_port_base, args.metrics_port_base + args.workers - 1),
+        (args.control_port, args.control_port),
+    ):
+        new = merge_ranges(new, low, high)
+    ephemeral_key = "net.ipv4.ip_local_port_range"
+    old_ephemeral = subprocess.check_output(["sysctl", "-n", ephemeral_key], text=True).strip()
+    new_ephemeral = "10240 65535" if args.expand_ephemeral_range else old_ephemeral
     path = Path("/etc/sysctl.d/90-gpustack-workersim-ports.conf")
     owner = "# Owned by GPUStack WorkerSim test-host setup\n"
     if args.apply:
         if path.exists() and not path.read_text().startswith(owner):
             raise RuntimeError("Refusing to replace an unowned sysctl file")
         subprocess.run(["sysctl", "-w", f"{key}={new}"], check=True, stdout=subprocess.DEVNULL)
-        path.write_text(owner + f"{key} = {new}\n")
+        preserve_ephemeral = path.exists() and ephemeral_key in path.read_text()
+        content = owner + f"{key} = {new}\n"
+        if args.expand_ephemeral_range or preserve_ephemeral:
+            subprocess.run(
+                ["sysctl", "-w", f"{ephemeral_key}={new_ephemeral}"],
+                check=True, stdout=subprocess.DEVNULL,
+            )
+            content += f"{ephemeral_key} = {new_ephemeral}\n"
+        path.write_text(content)
     print(
         json.dumps(
             {
                 "before": old,
                 "after": new,
                 "applied": args.apply,
+                "ephemeral_range_before": old_ephemeral,
+                "ephemeral_range_after": new_ephemeral,
                 "existing_connections": "Existing connections/TIME_WAIT are not removed",
             }
         )

@@ -1,0 +1,14 @@
+{
+  "target_commit": "458030e88718ce47bd31f7cdee9cbc8994a6760b",
+  "sha256": {
+    "worker/worker.py": "964bdd987b5cb96c979884b9c99a2ac0629eae6e650af3a0a81777039f18c255",
+    "worker/worker_manager.py": "9030ef0be79b7d2c0f4ccae4485dfb1f6aca359b7c73d67be0206a7186f0723d",
+    "worker/runtime_metrics_aggregator.py": "a9fb6693612746504f99df28ec85420a237ddf69128efd45644b67ddf80b7d44",
+    "worker/serve_manager.py": "aeea601f2f41bf25e45fa22f557b81ecaba6ac7dd578600cbb6ad6d5eaa40665",
+    "worker/model_file_manager.py": "1b6c16dbb3c98702ddc827b24e960e68412892fc7ee80eb118dffb97c7ae7710",
+    "client/generated_clientset.py": "cd294967293d48009fac06e624bb8176a736ceb1b5d53b3bad80609950c8d15f",
+    "client/generated_model_instance_client.py": "d288539bfaff3a8e3ad9dd9f30b51d2ef22c9d093a75138d9295c324beef06b8",
+    "utils/task.py": "4397a6116f28b6784ce806e28b8c48e487d76cc0ea8cfaa482f56ed6650144be",
+    "envs/__init__.py": "cca319ccaf2847e0838f8c8402a5407238813ac77f640529de72d01122b5cbf4"
+  }
+}

@@ -12,6 +12,17 @@ from workersim.config import GIB
 from workersim.hardware import Hardware, local_member
 from workersim.http_server import listen, metrics_app, worker_app
 from workersim.model_files import ModelFiles
+from workersim.native_contract import (
+    CACHE_PROVIDER_INTERVAL,
+    METRICS_CONFIG_TTL,
+    REGISTER_ATTEMPTS,
+    REGISTER_RETRY_SECONDS,
+    RUNTIME_METRICS_INITIAL_DELAY,
+    RUNTIME_METRICS_INTERVAL,
+    STATE_SYNC_INTERVAL,
+    WATCH_RECONNECT_SECONDS,
+    WATCH_RESOURCES,
+)
 from workersim.port_reservations import PortReservations
 from workersim.runtime import Runtime
 
@@ -36,9 +47,10 @@ class VirtualWorker:
         self.online = True
         self.watch_connected = False
         self.file_watch_connected = False
-        self.watch_connections = {"model-instances": 0, "model-files": 0}
-        self.event_counts = {"model-instances": 0, "model-files": 0}
-        self.snapshot_requested = True
+        self.watch_connections = dict.fromkeys(WATCH_RESOURCES, 0)
+        self.event_counts = dict.fromkeys(WATCH_RESOURCES, 0)
+        self.watch_states = dict.fromkeys(WATCH_RESOURCES, False)
+        self.watch_caches = {resource: {} for resource in WATCH_RESOURCES}
         self.report_errors = 0
         self.stale_reports = 0
         self.deleted_assignments = 0
@@ -68,6 +80,14 @@ class VirtualWorker:
 
     async def start(self, registration_token):
         self.registration_token = registration_token or self.registration_token
+        probe = await Client(self.config.server, "").open()
+        try:
+            version = await probe.request("GET", "/version", root=True, timeout=5)
+        finally:
+            await probe.close()
+        actual = str(version.get("version", "")).removeprefix("v")
+        if actual != TARGET_VERSION and not self.config.server.allow_version_mismatch:
+            raise ValueError(f"Expected GPUStack {TARGET_VERSION}, received {actual!r}")
         n = self.config.network
         self.listeners.append(
             await listen(worker_app(self), n.bind_host, n.api_port_base + self.spec.slot)
@@ -75,12 +95,37 @@ class VirtualWorker:
         self.listeners.append(
             await listen(metrics_app(self), n.bind_host, n.metrics_port_base + self.spec.slot)
         )
+        for attempt in range(REGISTER_ATTEMPTS):
+            try:
+                await self.register(registration_token)
+                break
+            except (APIError, aiohttp.ClientError, asyncio.TimeoutError):
+                if attempt == REGISTER_ATTEMPTS - 1:
+                    raise
+                await asyncio.sleep(REGISTER_RETRY_SECONDS)
+        log.info("Registered %s, Worker %s", self.spec.name, self.worker_id)
+        self.tasks = [
+            asyncio.create_task(
+                self.periodic("heartbeat", self.config.simulation.heartbeat_interval)
+            ),
+            asyncio.create_task(self.periodic("status", self.config.simulation.status_interval)),
+            asyncio.create_task(self.reconcile()),
+            asyncio.create_task(self.auxiliary_reports("providers", CACHE_PROVIDER_INTERVAL, 0)),
+            asyncio.create_task(self.auxiliary_reports(
+                "runtime-metrics", RUNTIME_METRICS_INTERVAL, RUNTIME_METRICS_INITIAL_DELAY
+            )),
+            asyncio.create_task(self.auxiliary_reports("benchmarks", STATE_SYNC_INTERVAL, 15)),
+            asyncio.create_task(self.auxiliary_reports("cache-services", STATE_SYNC_INTERVAL, 3)),
+            *[asyncio.create_task(self.watch(resource)) for resource in WATCH_RESOURCES],
+        ]
+        for task in self.tasks:
+            task.add_done_callback(self.background_done)
+
+    async def register(self, registration_token):
         # A bound Worker re-registers using its own credential, as required by ownership checks.
         register = await Client(
             self.config.server,
             self.identity.get("token", registration_token),
-            connector=self.fleet.connector,
-            request_slots=self.fleet.request_slots,
         ).open()
         try:
             body = self.status_payload() | {
@@ -97,6 +142,8 @@ class VirtualWorker:
             }
             if self.config.server.cluster_id is not None:
                 body["cluster_id"] = self.config.server.cluster_id
+            # Native initial collection detects system info; GPU detection is in the first status.
+            body["status"]["gpu_devices"] = None
             result = await register.request("POST", "/workers", body=body)
         finally:
             await register.close()
@@ -107,25 +154,15 @@ class VirtualWorker:
             self.identity["registration_token"] = self.registration_token
         self.worker_id = self.identity["id"]
         self.fleet.store.save(self.spec.name, self.identity)
-        self.client = await Client(
-            self.config.server,
-            self.identity["token"],
-            connector=self.fleet.connector,
-            request_slots=self.fleet.request_slots,
-        ).open()
-        await self.client.request("POST", "/worker-status", body=self.status_payload())
-        log.info("Registered %s, Worker %s", self.spec.name, self.worker_id)
-        self.tasks = [
-            asyncio.create_task(
-                self.periodic("heartbeat", self.config.simulation.heartbeat_interval)
-            ),
-            asyncio.create_task(self.periodic("status", self.config.simulation.status_interval)),
-            asyncio.create_task(self.watch()),
-            asyncio.create_task(self.watch("model-files")),
-            asyncio.create_task(self.reconcile()),
-        ]
-        for task in self.tasks:
-            task.add_done_callback(self.background_done)
+        if self.client:
+            await self.client.close()
+        self.client = await Client(self.config.server, self.identity["token"]).open()
+        me = await self.client.request("GET", "/workers", params={"me": "true"})
+        if len(me.get("items", [])) != 1 or me["items"][0]["id"] != self.worker_id:
+            raise RuntimeError("Native Worker self lookup did not return this identity")
+        # InferenceBackendManager initializes this cache once before opening its listener.
+        rows = await self.client.request("GET", "/inference-backends/all")
+        self.watch_caches["inference-backends"] = {row["id"]: row for row in rows}
 
     def background_done(self, task):
         if not task.cancelled() and task.exception():
@@ -144,8 +181,7 @@ class VirtualWorker:
         self.listeners.clear()
 
     async def periodic(self, kind, interval):
-        # Deterministic staggering avoids synchronizing all Worker heartbeat writes.
-        await asyncio.sleep(interval * (self.spec.slot + 1) / len(self.fleet.workers))
+        # Native run_periodically_in_thread starts immediately, then sleeps after each call.
         while True:
             if self.online:
                 try:
@@ -161,13 +197,16 @@ class VirtualWorker:
             await asyncio.sleep(interval)
 
     async def watch(self, resource="model-instances"):
-        delay = 1
         attribute = "file_watch_connected" if resource == "model-files" else "watch_connected"
 
         def connected():
-            setattr(self, attribute, True)
+            if resource in ("model-files", "model-instances"):
+                setattr(self, attribute, True)
+            self.watch_states[resource] = True
+            self.watch_caches[resource].clear()
+            if resource == "model-files":
+                self.model_files.items.clear()
             self.watch_connections[resource] += 1
-            self.snapshot_requested = True
 
         while True:
             if not self.online:
@@ -175,20 +214,29 @@ class VirtualWorker:
                 continue
             try:
                 async for event in self.client.watch(on_connect=connected, path="/" + resource):
-                    setattr(self, attribute, self.online)
+                    if resource in ("model-files", "model-instances"):
+                        setattr(self, attribute, self.online)
                     if not self.online:
                         break
-                    delay = 1
                     kind = str(event.get("type", "")).upper()
                     data = event.get("data") or {}
                     if kind == "HEARTBEAT":
                         continue
                     self.event_counts[resource] += 1
+                    key = data.get("id") or event.get("id")
+                    if key is None:
+                        continue
+                    cache = self.watch_caches[resource]
+                    if kind == "DELETED":
+                        cached = cache.pop(key, None)
+                        if cached and set(data) <= {"id"}:
+                            data = cached
+                    else:
+                        cache[key] = data
                     if resource == "model-files":
                         self.model_files.event(kind, data)
                         continue
-                    key = data.get("id") or event.get("id")
-                    if key is None:
+                    if resource != "model-instances":
                         continue
                     if kind == "DELETED":
                         self.instances.pop(key, None)
@@ -209,31 +257,43 @@ class VirtualWorker:
                 )
                 log.warning("%s watch reconnect: %s", self.spec.name, self.last_error)
             finally:
-                setattr(self, attribute, False)
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, 15)
+                if resource in ("model-files", "model-instances"):
+                    setattr(self, attribute, False)
+                self.watch_states[resource] = False
+                self.watch_caches[resource].clear()
+            await asyncio.sleep(WATCH_RECONNECT_SECONDS)
 
     async def reconcile(self):
-        next_refresh = 0
+        interval = self.config.simulation.reconcile_interval
+        next_refresh = time.monotonic() + interval if interval else float("inf")
+        next_state_sync = 0
         while True:
             if self.online:
                 now = time.monotonic()
-                if now >= next_refresh or self.snapshot_requested:
-                    self.snapshot_requested = False
+                if now >= next_state_sync:
                     try:
-                        # Watch reconnects do not replay deletions. A complete paginated snapshot
-                        # reaps disappeared assignments even if their deletion events were missed.
+                        cache = self.watch_caches["model-instances"]
+                        missing = set(self.instances) - set(cache)
                         epoch = self.event_counts["model-instances"]
-                        items = await self.client.list_all("/model-instances")
+                        authoritative = missing or now >= next_refresh
+                        if authoritative or not self.watch_connected:
+                            params = {"page": -1} if authoritative else None
+                            response = await self.client.request(
+                                "GET", "/model-instances", params=params
+                            )
+                            items = response.get("items", [])
+                        else:
+                            items = list(cache.values())
                         if epoch == self.event_counts["model-instances"]:
                             self.instances = {
                                 i["id"]: i for i in items if local_member(i, self.worker_id)
                             }
-                        await self.model_files.refresh()
+                        if authoritative:
+                            next_refresh = now + interval if interval else float("inf")
                     except (APIError, aiohttp.ClientError, asyncio.TimeoutError) as error:
                         self.report_errors += 1
                         self.last_error = type(error).__name__
-                    next_refresh = now + self.config.simulation.reconcile_interval
+                    next_state_sync = time.monotonic() + self.config.simulation.model_state_interval
                 try:
                     await self.model_files.tick()
                 except (APIError, aiohttp.ClientError, asyncio.TimeoutError) as error:
@@ -242,6 +302,48 @@ class VirtualWorker:
                 await self.runtime.tick()
                 self.port_reservations.reap()
             await asyncio.sleep(0.2)
+
+    async def auxiliary_reports(self, kind, interval, initial_delay):
+        """Native idle-worker REST traffic; local engine metric collection stays synthetic."""
+        await asyncio.sleep(initial_delay)
+        config_due = 0
+        while True:
+            if self.online:
+                try:
+                    if kind == "providers":
+                        await self.client.request("GET", "/cache-providers", params={"page": 0})
+                    elif kind == "runtime-metrics":
+                        if time.monotonic() >= config_due:
+                            try:
+                                await self.client.request("GET", "/metrics/config", timeout=2)
+                            except (APIError, aiohttp.ClientError, asyncio.TimeoutError):
+                                # Native aggregator also falls back to its built-in config.
+                                pass
+                            config_due = time.monotonic() + METRICS_CONFIG_TTL
+                        await self.client.request("GET", f"/workers/{self.worker_id}")
+                        if not self.watch_states["models"]:
+                            await self.client.request("GET", "/models")
+                        if not self.watch_connected:
+                            await self.client.request(
+                                "GET", "/model-instances",
+                                params={"cluster_id": self.identity["cluster_id"]},
+                            )
+                    elif kind == "benchmarks" and not self.watch_states["benchmarks"]:
+                        await self.client.request(
+                            "GET", "/benchmarks",
+                            params={"worker_id": self.worker_id, "state": "running"}
+                        )
+                    elif kind == "cache-services" and not self.watch_states[
+                        "cache-service-instances"
+                    ]:
+                        await self.client.request(
+                            "GET", "/cache-service-instances", params={"worker_id": self.worker_id}
+                        )
+                except (APIError, aiohttp.ClientError, asyncio.TimeoutError) as error:
+                    self.report_errors += 1
+                    self.last_error = str(error) or type(error).__name__
+                await asyncio.sleep(0)  # let independent heartbeat/status tasks run
+            await asyncio.sleep(interval)
 
     def summary(self):
         return {
@@ -252,6 +354,7 @@ class VirtualWorker:
             "watch_connected": self.watch_connected,
             "file_watch_connected": self.file_watch_connected,
             "watch_connections": self.watch_connections,
+            "watch_states": self.watch_states,
             "events_received": self.event_counts,
             "model_files": len(self.model_files.items),
             "model_files_ready": sum(

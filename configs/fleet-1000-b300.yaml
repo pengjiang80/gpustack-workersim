@@ -2,8 +2,6 @@
 # Reserve 40000-59999 on the host before starting; set nofile to 65536.
 server:
   url: http://127.0.0.1:18080
-  request_timeout: 120
-  request_concurrency: 16
 network:
   advertise_address: 172.17.0.1
   worker_ip: 172.17.0.1
@@ -18,7 +16,7 @@ simulation:
   registration_concurrency: 8
   heartbeat_interval: 30
   status_interval: 30
-  reconcile_interval: 30
+  reconcile_interval: 0
 worker_groups:
   - name_prefix: sim-b300
     count: 1000

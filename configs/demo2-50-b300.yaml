@@ -14,7 +14,7 @@
     "namespace": "workersim-demo2",
     "data_dir": "/data",
     "registration_rate": 2,
-    "reconcile_interval": 30
+    "reconcile_interval": 0
   },
   "worker_groups": [
     {

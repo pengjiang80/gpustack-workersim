@@ -20,7 +20,7 @@ WorkerSim has its own product version. See [Releases](https://github.com/pengjia
 - **Configurable hardware:** worker count, accelerator profile, cards per worker, CPU, RAM, disk, and labels. Supports NVIDIA GPUs and Ascend CANN NPUs.
 - **Deployment lifecycles:** receives real assignments and reports initialization, startup, running, failure, and stop transitions.
 - **Scheduling scenarios:** ordinary replicas, cross-worker placement, PD prefill/decode/router roles, and tested vLLM/SGLang orchestration layouts with generation-fenced workload reports.
-- **Event reconciliation:** separate model-instance and model-file watches, reconnect handling, paginated snapshots, and cleanup after scale-down or deletion.
+- **Native communication:** six event watches per worker, independent HTTP connections, native heartbeat/status cadence, watch caches, reconnect replay, and authoritative cleanup checks.
 - **Model-file simulation:** download progress, Ready state, virtual paths, and synthetic file sizes without downloading weights.
 - **Native monitoring:** device utilization, VRAM use/allocation, temperature, power, model request/token counters, latency histograms, and supported KV-cache/PD/router metrics.
 - **Synthetic APIs:** chat, streaming chat, embeddings, reranking, transcription, and a short silent WAV speech fixture.
@@ -98,7 +98,7 @@ simulation:
   namespace: workersim-b300
   data_dir: /data
   registration_rate: 2
-  reconcile_interval: 30
+  reconcile_interval: 0
   model_requests_per_second: 2
 worker_groups:
   - name_prefix: sim-b300
@@ -139,9 +139,11 @@ At 1000 workers, the inference pool spans **40000–59999**. The first worker us
 
 Use distinct service pools for multiple simulator processes on one host. Optional `network.worker_ip_cidr` assigns separate worker IPs; configure host addresses and routing before startup. A Linux test-host helper is available in [`configure_virtual_network.py`](scripts/configure_virtual_network.py).
 
-For 1000 workers, mount `configs/fleet-1000-b300.yaml` as `/config/fleet.yaml` in Compose and reserve ports with `--workers 1000`. Keep `nofile=65536`; every worker needs two listeners and two persistent event connections. The example allows up to 10 registrations/s (at least 100 seconds just for pacing), limits in-flight starts to 8 with `simulation.registration_concurrency`, staggers 30-second reports, and shares the HTTP transport while keeping authentication independent. A slower Server makes registration take longer; queued starts wait locally before their HTTP timeout begins.
+For 1000 workers, mount `configs/fleet-1000-b300.yaml` as `/config/fleet.yaml` in Compose and run `sudo python3 scripts/configure_port_reservations.py --workers 1000 --expand-ephemeral-range --apply`. The helper reserves API, metrics, control, and model ports, and explicitly expands the test host's automatic source-port range so thousands of independent outbound connections fit. Keep `nofile=65536`.
 
-`server.request_concurrency` caps ordinary REST requests and watch handshakes across the fleet at **16**. Established watch streams release this quota immediately and remain connected. This avoids overwhelming a small Server database pool; raise the quota deliberately when testing higher concurrency. CPU, RAM, and Server load still depend on model count and event volume; 1000-worker capacity is not a guarantee of scheduler throughput.
+Each worker has **six persistent event watches** and its own connection pool. Heartbeat/status reports start immediately and repeat every 30 seconds after completion. Runtime metrics retain the native Worker lookup cadence. There is no fleet-wide REST limiter or shared connection pool to reduce Server pressure. See the [communication contract](docs/native-worker-communication.md) for endpoints, cache behavior, retry timing, and supported execution scope.
+
+The example starts at most 10 workers/s, with up to 8 workers starting concurrently; these settings affect fleet startup only. Keep `reconcile_interval: 0` for the native cache-backed behavior. Size the Server/database for the generated load; 1000-worker simulator capacity is not a scheduler throughput guarantee. Acceptance can use GPUStack's documented database pool settings without changing Worker traffic.
 
 Keep the data directory or Docker volume to preserve identities. Each namespace belongs to one Server URL and has a process lock. Fleet configuration changes require a restart; retain worker names and group order to preserve port assignments.
 

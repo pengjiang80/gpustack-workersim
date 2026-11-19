@@ -1,4 +1,4 @@
-"""1000 real listener pairs and 2000 authenticated watches against the protocol fixture."""
+"""1000 real listener pairs and 6000 authenticated watches against the protocol fixture."""
 
 import asyncio
 import json
@@ -21,20 +21,23 @@ async def test_thousand_workers_shared_ip(config, control_plane, monkeypatch):
         worker_ip="127.252.0.1",
     )
     config.simulation.registration_rate = 100
-    config.simulation.heartbeat_interval = 5
-    config.simulation.status_interval = 5
-    config.simulation.reconcile_interval = 5
+    config.simulation.heartbeat_interval = 30
+    config.simulation.status_interval = 30
+    config.simulation.reconcile_interval = 0
+    config.simulation.model_state_interval = 3
     config.validate()
-    control_plane.watch_heartbeat_interval = 5
+    control_plane.watch_heartbeat_interval = 30
     monkeypatch.setenv("GPUSTACK_REGISTRATION_TOKEN", "registration-secret")
     fleet = Fleet(config)
     task = asyncio.create_task(fleet.run())
     started = time.monotonic()
     try:
         await eventually(lambda: len(control_plane.statuses) == 1000, timeout=120)
-        await eventually(lambda: len(control_plane.watchers) == 2000, timeout=30)
+        await eventually(lambda: len(control_plane.watchers) == 6000, timeout=45)
         assert len({w.identity["token"] for w in fleet.workers}) == 1000
         assert len({w.identity["worker_uuid"] for w in fleet.workers}) == 1000
+        assert len({id(w.client.session.connector) for w in fleet.workers}) == 1000
+        assert control_plane.version_requests == 1000
         assert sum(len(s["status"]["gpu_devices"]) for s in control_plane.statuses.values()) == 8000
         persisted = json.loads(fleet.store.path.read_text())
         assert len(persisted["workers"]) == 1000
@@ -60,10 +63,12 @@ async def test_thousand_workers_shared_ip(config, control_plane, monkeypatch):
                 "http://127.0.0.1:20099/scale", json={"count": 1000}
             ) as response:
                 assert response.status == 200
-        control_plane.instances.clear()
+        for key in (1, 2):
+            control_plane.instances.pop(key)
+            await control_plane.emit("DELETED", {"id": key})
         await eventually(lambda: not fleet.ports, timeout=20)
         assert sum(w.report_errors for w in fleet.workers) == 0
-        print(f"1000 Workers / 2000 watches validated in {time.monotonic() - started:.2f}s")
+        print(f"1000 Workers / 6000 watches validated in {time.monotonic() - started:.2f}s")
     finally:
         fleet.stop.set()
         await task

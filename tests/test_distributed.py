@@ -172,9 +172,10 @@ async def test_pd_roles_and_file_progress_reconnect_and_delete(config, control_p
         assert 'role="router"' in text and "gpustack:pd_router_requests_total" in text
         connections = worker.watch_connections["model-files"]
         await control_plane.emit("DISCONNECT", {}, "model-files")
-        await eventually(lambda: worker.watch_connections["model-files"] > connections)
-        # A deletion lost during disconnection is repaired by the full snapshot.
+        await eventually(lambda: not worker.file_watch_connected)
+        # Native reconnect clears the watch cache before replay, without periodic GETs.
         control_plane.files.pop(7)
+        await eventually(lambda: worker.watch_connections["model-files"] > connections)
         await eventually(lambda: not worker.model_files.items)
         # Stop barrier must be confirmed with the original Server token.
         instance = control_plane.instances[10]

@@ -10,8 +10,13 @@ permissions:
 
 jobs:
   scale:
+    name: ${{ matrix.workers }} native Workers
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        workers: [500, 1000]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -25,15 +30,15 @@ jobs:
           python -m pip install --no-deps -e .
       - name: Reserve ports and pull original Server
         run: |
-          sudo python scripts/configure_port_reservations.py --workers 1000 --apply
+          sudo python scripts/configure_port_reservations.py --workers ${{ matrix.workers }} --expand-ephemeral-range --apply
           docker pull gpustack/gpustack:v2.3.1
-      - name: Register 1000 B300 Workers and exercise replicas
+      - name: Register native B300 Workers and exercise replicas
         run: |
           ulimit -n 65536
-          python -m scripts.scale_acceptance
+          python -m scripts.scale_acceptance --workers ${{ matrix.workers }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: original-server-1000-workers
+          name: original-server-${{ matrix.workers }}-workers
           path: outputs/scale-acceptance/
           if-no-files-found: ignore
