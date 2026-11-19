@@ -222,6 +222,7 @@ These are integration snapshots under the configurations and versions described 
 
 | Scenario | Result | Report |
 |---|---|---|
+| demo2 upgrade / custom GPU reporting | 53 simulated workers and 28 models retained; custom CUDA/CANN names and memory verified | [Upgrade and image migration](docs/demo2-upgrade-2026-11-20.md) |
 | Native communication / 1000-Worker protocol fixture | 8000 devices, 6000 watches; original-Server 500/1000 stability not yet passed | [Scale validation and limits](docs/scale-1000-validation.md) |
 | Original GPUStack | 100 workers, 800 simulated B300 devices | [Integration](docs/workersim-040-validation.md) |
 | GLM-5.3 PD 5P3D | Tested at 10, 20, 40, 60, 80 and 100 workers | [Scale experiment and version boundaries](docs/glm53-pd-benchmark-2026-11-17.md) |

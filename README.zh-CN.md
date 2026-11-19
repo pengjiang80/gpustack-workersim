@@ -177,6 +177,7 @@ workersim --config configs/local.yaml stop
 
 ## 验证与使用限制
 
+- demo2：[53 个模拟节点、28 个模型保留升级，以及 CUDA/CANN 自定义名称与显存验证](docs/demo2-upgrade-2026-11-20.md)。
 - 原生通信：[1000 节点协议回归通过，8000 张设备、6000 路 watch；原版 Server 的 500/1000 节点稳定性尚未通过](docs/scale-1000-validation.md)。
 - 原版 GPUStack：[100 Worker / 800 张 B300 验证](docs/workersim-040-validation.md)。
 - GLM-5.3 5P3D：[10–100 Worker 规模实验](docs/glm53-pd-benchmark-2026-11-17.md)，具体版本及测量边界见报告。
