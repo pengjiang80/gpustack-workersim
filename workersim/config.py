@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 import yaml
 
 GIB = 1024**3
-MAX_WORKERS = 100
+MAX_WORKERS = 1000
 PROFILES = {
     "ascend-910b4-64gb": {
         "name": "Ascend 910B4",
@@ -92,9 +92,9 @@ class NetworkConfig:
     worker_ip: str = "127.0.0.1"
     worker_ip_cidr: str | None = None
     api_port_base: int = 20100
-    metrics_port_base: int = 20200
+    metrics_port_base: int = 21100
     instance_port_start: int = 40000
-    instance_port_end: int = 40063
+    instance_port_end: int = 40019
     instance_port_stride: int | None = None
     control_port: int = 20099
 
@@ -249,6 +249,16 @@ class Config:
             type(n.instance_port_stride) is not int or not 0 <= n.instance_port_stride <= 65535
         ):
             raise ValueError("instance_port_stride must be a nonnegative integer")
+        width = n.instance_port_end - n.instance_port_start + 1
+        if (
+            not n.worker_ip_cidr
+            and count > 1
+            and n.instance_port_stride is not None
+            and 0 < n.instance_port_stride < width
+        ):
+            raise ValueError(
+                "Per-Worker instance port blocks overlap; use stride 0 for a shared pool"
+            )
         for worker in workers:
             low, high = n.instance_ports_for_slot(worker.slot)
             if high > 65535:

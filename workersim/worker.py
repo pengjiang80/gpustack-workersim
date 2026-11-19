@@ -77,7 +77,9 @@ class VirtualWorker:
         )
         # A bound Worker re-registers using its own credential, as required by ownership checks.
         register = await Client(
-            self.config.server, self.identity.get("token", registration_token)
+            self.config.server,
+            self.identity.get("token", registration_token),
+            connector=self.fleet.connector,
         ).open()
         try:
             body = self.status_payload() | {
@@ -104,7 +106,9 @@ class VirtualWorker:
             self.identity["registration_token"] = self.registration_token
         self.worker_id = self.identity["id"]
         self.fleet.store.save(self.spec.name, self.identity)
-        self.client = await Client(self.config.server, self.identity["token"]).open()
+        self.client = await Client(
+            self.config.server, self.identity["token"], connector=self.fleet.connector
+        ).open()
         await self.client.request("POST", "/worker-status", body=self.status_payload())
         log.info("Registered %s, Worker %s", self.spec.name, self.worker_id)
         self.tasks = [

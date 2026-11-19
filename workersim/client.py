@@ -17,16 +17,20 @@ class APIError(Exception):
 
 
 class Client:
-    def __init__(self, config: ServerConfig, token: str):
+    def __init__(self, config: ServerConfig, token: str, *, connector=None):
         self.config = config
         self.token = token
+        self.connector = connector
         self.session: aiohttp.ClientSession | None = None
 
     async def open(self):
         self.session = aiohttp.ClientSession(
             headers={"Authorization": f"Bearer {self.token}"},
             timeout=aiohttp.ClientTimeout(total=self.config.request_timeout),
-            connector=aiohttp.TCPConnector(ssl=self.config.verify_ssl, limit=8),
+            connector=self.connector or aiohttp.TCPConnector(ssl=self.config.verify_ssl, limit=8),
+            connector_owner=self.connector is None,
+            # Credentials and cookies must never cross logical Worker identities.
+            cookie_jar=aiohttp.DummyCookieJar(),
             trust_env=False,
         )
         return self

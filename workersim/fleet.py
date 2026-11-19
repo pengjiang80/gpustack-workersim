@@ -7,7 +7,7 @@ import os
 import signal
 from importlib.resources import files
 
-from aiohttp import web
+from aiohttp import TCPConnector, web
 
 from workersim import TARGET_VERSION, __version__
 from workersim.client import Client, cancel_tasks
@@ -29,6 +29,7 @@ class Fleet:
         self.logical_ports = {}
         self.stop = asyncio.Event()
         self.failure = None
+        self.connector = None
         self.pd_catalog = json.loads(files("workersim").joinpath("data/pd_ports.json").read_text())
 
     async def run(self):
@@ -36,6 +37,12 @@ class Fleet:
         control = None
         starters = []
         try:
+            # Two persistent watches per Worker, plus a bounded pool for ordinary requests.
+            # Share sockets, never session authentication, to avoid thousands of idle pools.
+            self.connector = TCPConnector(
+                ssl=self.config.server.verify_ssl,
+                limit=2 * len(self.config.workers()) + 128,
+            )
             token = os.environ.get(self.config.server.registration_token_env, "")
             if not token and not self.store.workers:
                 raise ValueError(f"Set {self.config.server.registration_token_env} before starting")
@@ -76,6 +83,8 @@ class Fleet:
             await cancel_tasks(starters)
             for worker in self.workers:
                 await worker.close()
+            if self.connector:
+                await self.connector.close()
             if control:
                 await control.cleanup()
             self.store.close()

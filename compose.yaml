@@ -1,7 +1,7 @@
 services:
   workersim:
     build: .
-    image: gpustack/gpustack-workersim:0.4.5
+    image: gpustack/gpustack-workersim:0.1.0
     network_mode: host
     init: true
     restart: unless-stopped

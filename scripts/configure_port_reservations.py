@@ -26,16 +26,26 @@ def merge_ranges(value, low, high):
     return ",".join(str(a) if a == b else f"{a}-{b}" for a, b in merged)
 
 
+def fleet_port_range(workers, ports_per_worker=20, start_port=40000):
+    if not 1 <= workers <= 1000:
+        raise ValueError("Worker count must be 1..1000")
+    end_port = start_port + workers * ports_per_worker - 1
+    if ports_per_worker < 1 or not 1024 <= start_port <= end_port <= 65535:
+        raise ValueError("Fleet inference ports must fit in 1024..65535")
+    return start_port, end_port
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workers", type=int, default=100)
+    parser.add_argument("--ports-per-worker", type=int, default=20)
+    parser.add_argument("--start-port", type=int, default=40000)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    if not 1 <= args.workers <= 100:
-        raise ValueError("Worker count must be 1..100")
+    low, high = fleet_port_range(args.workers, args.ports_per_worker, args.start_port)
     key = "net.ipv4.ip_local_reserved_ports"
     old = subprocess.check_output(["sysctl", "-n", key], text=True).strip()
-    new = merge_ranges(old, 40000, 40000 + args.workers * 64 - 1)
+    new = merge_ranges(old, low, high)
     path = Path("/etc/sysctl.d/90-gpustack-workersim-ports.conf")
     owner = "# Owned by GPUStack WorkerSim test-host setup\n"
     if args.apply:

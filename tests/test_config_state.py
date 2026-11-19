@@ -22,6 +22,24 @@ def test_hundred_b300_configuration():
     assert all(d["compute_capability"] == "10.3" for d in devices)
 
 
+def test_thousand_b300_configuration_and_port_limits():
+    config = load_config("configs/fleet-1000-b300.yaml")
+    assert len(config.workers()) == 1000
+    assert sum(w.group.gpu_count for w in config.workers()) == 8000
+    assert config.network.instance_ports_for_slot(999) == (59980, 59999)
+    config.network.metrics_port_base = 20200
+    with pytest.raises(ValueError, match="overlap"):
+        config.validate()
+    config.network.metrics_port_base = 21100
+    config.network.instance_port_end = 40063
+    with pytest.raises(ValueError, match="65535"):
+        config.validate()
+    config.network.instance_port_end = 40019
+    config.network.instance_port_stride = 10
+    with pytest.raises(ValueError, match="overlap"):
+        config.validate()
+
+
 @pytest.mark.parametrize("change", ["duplicate_names", "overlap", "too_many", "zero_interval"])
 def test_invalid_configuration(config, change):
     if change == "duplicate_names":

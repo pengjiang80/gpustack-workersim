@@ -4,7 +4,9 @@
 
 **只用 CPU 主机，验证 GPUStack 的节点管理、模型调度、部署生命周期和监控展示。**
 
-WorkerSim 是独立的 GPUStack **2.3.1 Worker 协议模拟器**，无需修改 Server 或 UI。单进程最多管理 **100 个独立节点**，每个节点拥有自己的身份、心跳、事件订阅、HTTP 接口和监控端口。
+WorkerSim 是独立的 **GPUStack Worker 协议模拟器**，无需修改 Server 或 UI。单进程最多管理 **1000 个独立节点**，每个节点拥有自己的身份、心跳、事件订阅、HTTP 接口和监控端口。
+
+WorkerSim 使用独立产品版本。各版本支持的 GPUStack 版本见 [Releases](https://github.com/pengjiang80/gpustack-workersim/releases)，启动时会检查协议兼容性。
 
 调度由真实 GPUStack Server 执行，WorkerSim 接收任务并模拟节点行为。无需真实 GPU、模型权重或推理引擎，监控指标均为合成数据。
 
@@ -22,7 +24,7 @@ WorkerSim 是独立的 GPUStack **2.3.1 Worker 协议模拟器**，无需修改 
 
 ## Docker 快速启动
 
-推荐使用 Linux host networking。先准备 GPUStack **2.3.1** Server，在 UI 创建测试集群，从添加 Worker 的说明中获取注册 Token。
+推荐使用 Linux host networking。先准备当前 WorkerSim Release 支持的 GPUStack Server，在 UI 创建测试集群，从添加 Worker 的说明中获取注册 Token。
 
 ```bash
 git clone https://github.com/pengjiang80/gpustack-workersim.git
@@ -40,7 +42,7 @@ cd gpustack-workersim
 ```bash
 sudo python3 scripts/configure_port_reservations.py --workers 2 --apply
 export GPUSTACK_REGISTRATION_TOKEN='<集群注册Token>'
-docker pull gpustack/gpustack-workersim:0.4.5
+docker pull gpustack/gpustack-workersim:0.1.0
 docker compose up -d --no-build
 docker compose logs -f workersim
 docker compose exec workersim workersim --config /config/fleet.yaml status
@@ -87,11 +89,22 @@ worker_groups:
 
 容量、版本和功耗属于模拟配置，不代表真实设备的精确参数。Ascend 按 `ascend/cann` 上报，不填写 CUDA compute capability。
 
-示例：[50 个混合 GPU 节点](configs/fleet-50.yaml)、[100 个八卡 B300 节点](configs/fleet-100-b300.yaml)、[3 个八卡 910B4 节点](configs/demo2-3-910b4.yaml)。
+示例：[50 个混合 GPU 节点](configs/fleet-50.yaml)、[100 个八卡 B300 节点](configs/fleet-100-b300.yaml)、[1000 个八卡 B300 节点](configs/fleet-1000-b300.yaml)、[3 个八卡 910B4 节点](configs/demo2-3-910b4.yaml)。
 
 ## 网络与持久化
 
-默认同 IP、不同端口：Worker API 从 20100 开始，监控从 20200 开始，每节点各占一个端口；模型端口每节点占 64 个，从 40000 开始。100 节点范围为 **40000–46399**，控制接口仅监听 `127.0.0.1:20099`。
+默认同 IP、不同端口。1000 节点的端口布局如下：
+
+| 用途 | 端口范围 |
+|---|---|
+| Worker API | `20100–21099`，每节点 1 个 |
+| Worker 监控 | `21100–22099`，每节点 1 个 |
+| 模型端口池 | `40000–59999`，每节点 20 个 |
+| 控制接口 | `127.0.0.1:20099` |
+
+第一个节点使用 `40000–40019`，第 1000 个使用 `59980–59999`。这是模拟器自己的默认分配，不改变 GPUStack Server；只有已分配的模型任务才打开模型监听端口。复杂 PD/分布式布局可能需要更多端口，可增大 `network.instance_port_end`，同时减少单 IP 节点数量或拆分 IP/主机；预留脚本提供 `--ports-per-worker`、`--start-port` 与自定义配置对应。
+
+启动 1000 节点时，在 Compose 中将配置挂载改为 `configs/fleet-1000-b300.yaml:/config/fleet.yaml:ro`，预留端口命令使用 `--workers 1000`，保留 `nofile=65536`。每个节点有两个监听器和两路常驻事件连接；示例每秒注册 10 个节点，光注册节流约需 100 秒，心跳与状态上报按 30 秒错峰发送。底层连接池共享，认证仍独立。实际 CPU、内存和 Server 压力取决于模型数与事件量，节点容量不代表调度吞吐保证。
 
 同主机多个进程应使用不同端口池。独立 IP 可通过 `network.worker_ip_cidr` 配置，并先准备宿主机地址和路由；可参考 [`configure_virtual_network.py`](scripts/configure_virtual_network.py)。
 
@@ -118,12 +131,12 @@ workersim --config configs/local.yaml stop
 
 ## 验证与使用限制
 
-- 原版 2.3.1：[100 Worker / 800 张 B300 验证](docs/workersim-040-validation.md)。
+- 原版 GPUStack：[100 Worker / 800 张 B300 验证](docs/workersim-040-validation.md)。
 - GLM-5.3 5P3D：[10–100 Worker 规模实验](docs/glm53-pd-benchmark-2026-11-17.md)，具体版本及测量边界见报告。
-- 企业版 2.3.1-ent2：[50 个 B300 Worker、16 个模型、116 个 Running 副本验收快照](docs/demo2-deployment-2026-11-17.md)。
+- 已测企业版：[50 个 B300 Worker、16 个模型、116 个 Running 副本验收快照](docs/demo2-deployment-2026-11-17.md)。
 - Ascend：[3 个 Worker、24 张 64 GiB 设备及监控、双 watch、重启恢复](docs/demo2-910b4-2026-11-17.md)。
 
-目标协议为 GPUStack v2.3.1、commit `458030e88718ce47bd31f7cdee9cbc8994a6760b`。其他版本需要单独验证，已测试企业版显式启用 `allow_version_mismatch`。
+兼容版本和协议来源 commit 在每个 [Release](https://github.com/pengjiang80/gpustack-workersim/releases) 中说明。其他版本需要单独验证，已测试企业版显式启用 `allow_version_mismatch`。
 
 不执行真实推理、权重下载、GPU kernel、NCCL/Ray 或 KV 数据传输。embedding 为测试向量，rerank 使用固定顺序，转写返回模拟提示，TTS 固定返回 **0.25 秒静音 WAV**。指标不能用于真实推理性能、请求审计或计费。
 

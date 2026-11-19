@@ -1,0 +1,27 @@
+# Single Linux host, shared IP, 1000 Workers / 8000 simulated B300 devices.
+# Reserve 40000-59999 on the host before starting; set nofile to 65536.
+server:
+  url: http://127.0.0.1:18080
+  request_timeout: 120
+network:
+  advertise_address: 172.17.0.1
+  worker_ip: 172.17.0.1
+  api_port_base: 20100
+  metrics_port_base: 21100
+  instance_port_start: 40000
+  instance_port_end: 40019
+simulation:
+  namespace: workersim-b300-1000
+  data_dir: /data
+  registration_rate: 10
+  heartbeat_interval: 30
+  status_interval: 30
+  reconcile_interval: 30
+worker_groups:
+  - name_prefix: sim-b300
+    count: 1000
+    gpu_profile: b300-288gb
+    gpu_count: 8
+    cpu_cores: 192
+    memory_gib: 2048
+    disk_gib: 8192

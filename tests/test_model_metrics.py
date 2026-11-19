@@ -97,11 +97,11 @@ def test_default_shared_ip_port_blocks_and_unique_ip_reuse():
     from workersim.config import NetworkConfig
 
     network = NetworkConfig()
-    assert network.instance_ports_for_slot(0) == (40000, 40063)
-    assert network.instance_ports_for_slot(1) == (40064, 40127)
-    assert network.instance_ports_for_slot(99) == (46336, 46399)
+    assert network.instance_ports_for_slot(0) == (40000, 40019)
+    assert network.instance_ports_for_slot(1) == (40020, 40039)
+    assert network.instance_ports_for_slot(999) == (59980, 59999)
     network.worker_ip_cidr = "10.250.0.0/24"
-    assert network.instance_ports_for_slot(99) == (40000, 40063)
+    assert network.instance_ports_for_slot(99) == (40000, 40019)
 
 
 def test_smg_metrics_include_current_component_attempt():

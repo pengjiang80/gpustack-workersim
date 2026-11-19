@@ -63,6 +63,7 @@ class ControlPlane:
         self.requests = []
         self.managed_reports = []
         self.reject_report = None
+        self.watch_heartbeat_interval = 0.1
 
     async def handler(self, request):
         path = request.path
@@ -114,7 +115,9 @@ class ControlPlane:
                 try:
                     while True:
                         try:
-                            event = await asyncio.wait_for(queue.get(), 0.1)
+                            event = await asyncio.wait_for(
+                                queue.get(), self.watch_heartbeat_interval
+                            )
                         except asyncio.TimeoutError:
                             event = {"type": "HEARTBEAT", "data": None}
                         if event.get("type") == "DISCONNECT":

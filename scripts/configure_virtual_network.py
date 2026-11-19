@@ -17,8 +17,8 @@ def plan(cidr, count, routes, interface):
         for private in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
     ):
         raise ValueError("Use an RFC1918 IPv4 subnet")
-    if not 1 <= count <= 100 or network.num_addresses - 2 < count:
-        raise ValueError("Subnet must have enough usable addresses for 1..100 nodes")
+    if not 1 <= count <= 1000 or network.num_addresses - 2 < count:
+        raise ValueError("Subnet must have enough usable addresses for 1..1000 nodes")
     if not re.fullmatch(r"workersim[a-z0-9]{0,6}", interface):
         raise ValueError("Interface must have a workersim prefix and at most 15 characters")
     for route in routes:

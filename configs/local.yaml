@@ -8,7 +8,7 @@ network:
   advertise_address: 127.0.0.1
   worker_ip: 127.0.0.1
   api_port_base: 20100
-  metrics_port_base: 20200
+  metrics_port_base: 21100
   instance_port_start: 21000
   instance_port_end: 29999
   control_port: 20099

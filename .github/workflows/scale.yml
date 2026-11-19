@@ -1,0 +1,37 @@
+name: Original Server scale acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install WorkerSim
+        run: |
+          python -m pip install --require-hashes -r requirements.lock
+          python -m pip install --no-deps -e .
+      - name: Reserve ports and pull original Server
+        run: |
+          sudo python scripts/configure_port_reservations.py --workers 1000 --apply
+          docker pull gpustack/gpustack:v2.3.1
+      - name: Register 1000 B300 Workers and exercise replicas
+        run: |
+          ulimit -n 65536
+          python -m scripts.scale_acceptance
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: original-server-1000-workers
+          path: outputs/scale-acceptance/
+          if-no-files-found: ignore

@@ -20,15 +20,19 @@ Docker Hub 组织命名空间可以与登录账号不同。令牌放在 GitHub S
 
 ## 同步与发布
 
-向 `main` 推送代码会运行 CI。推送与 `pyproject.toml` 中版本一致的标签会运行测试，再构建并推送镜像：
+产品版本与 GPUStack 兼容版本独立。`pyproject.toml`、`workersim.__version__` 保存产品版本，`workersim.TARGET_VERSION` 保存协议版本；GitHub Release 标签为 `v{产品版本}-gpustack{协议版本}`。README 不固定 GPUStack 版本，兼容表和协议 commit 放在 Release 说明中。
+
+向 `main` 推送代码会运行 CI。推送匹配上述规则的标签会运行测试，再构建并推送镜像：
 
 ```bash
 git push origin main
-git tag v0.4.5
-git push origin v0.4.5
+git tag -a v0.1.0-gpustack2.3.1 -m 'WorkerSim 0.1.0 / GPUStack 2.3.1'
+git push origin v0.1.0-gpustack2.3.1
 ```
 
-发布标签为 `${DOCKERHUB_IMAGE}:0.4.5`。工作流会在 Docker Hub 按 digest 拉取已发布的镜像，并运行 `--version` 验证。标签版本与源码版本不一致时终止发布。
+镜像同时发布 `${DOCKERHUB_IMAGE}:0.1.0` 和 `${DOCKERHUB_IMAGE}:0.1.0-gpustack2.3.1`，两者指向相同构建。协议版本与 commit 也写入 OCI label。工作流会在 Docker Hub 按 digest 拉取已发布的镜像，并运行 `--version` 验证，然后使用 `docs/releases/{产品版本}.md` 创建 GitHub Release。标签与源码元数据不一致时终止发布。
+
+0.1.0 开始采用公开产品版本序列，早期 0.4.x 开发标签保留。后续修复递增到 0.1.1，功能迭代可用 0.2.0；升级 GPUStack 协议时同时调整兼容后缀、来源 commit 和 Release 兼容表，不复用已发布的标签。
 
 也可以在 GitHub Actions 中手动运行 `Publish Docker image`。默认仅发布版本号标签；勾选 `Also update the latest image tag` 后才更新 `latest`。
 

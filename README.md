@@ -3,11 +3,12 @@
 [![CI](https://github.com/pengjiang80/gpustack-workersim/actions/workflows/ci.yml/badge.svg)](https://github.com/pengjiang80/gpustack-workersim/actions/workflows/ci.yml)
 [![Docker Hub](https://img.shields.io/badge/Docker%20Hub-gpustack%2Fgpustack--workersim-2496ED?logo=docker)](https://hub.docker.com/r/gpustack/gpustack-workersim)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
-[![GPUStack](https://img.shields.io/badge/GPUStack-2.3.1-blue)](https://github.com/gpustack/gpustack)
 
 **Test GPUStack scheduling, deployment lifecycles, and monitoring on CPU-only machines.**
 
-WorkerSim is a standalone worker protocol simulator for unmodified GPUStack **2.3.1**. One process can register up to **100 independent workers**, expose virtual GPU/NPU inventories, receive assignments from the real scheduler, and report synthetic monitoring data to the standard UI.
+WorkerSim is a standalone worker protocol simulator for unmodified GPUStack. One process can register up to **1000 independent workers**, expose virtual GPU/NPU inventories, receive assignments from the real scheduler, and report synthetic monitoring data to the standard UI.
+
+WorkerSim has its own product version. See [Releases](https://github.com/pengjiang80/gpustack-workersim/releases) for the GPUStack version supported by each release; startup checks protocol compatibility.
 
 [中文说明](README.zh-CN.md) · [Quick start](#quick-start) · [Configuration](#configuration) · [Validation](#validation) · [Publishing](docs/publishing.md)
 
@@ -43,7 +44,7 @@ Server and WorkerSim can share a CPU host or run on different hosts. Server and 
 
 ### 1. Configure a test cluster
 
-Use an existing GPUStack **2.3.1** Server. Create a test cluster in the UI and obtain its worker registration token from the **Add Worker** instructions.
+Use a GPUStack Server supported by your WorkerSim release. Create a test cluster in the UI and obtain its worker registration token from the **Add Worker** instructions.
 
 ```bash
 git clone https://github.com/pengjiang80/gpustack-workersim.git
@@ -72,7 +73,7 @@ Adjust the count to match the configuration. The helper preserves existing reser
 
 ```bash
 export GPUSTACK_REGISTRATION_TOKEN='<cluster-registration-token>'
-docker pull gpustack/gpustack-workersim:0.4.5
+docker pull gpustack/gpustack-workersim:0.1.0
 docker compose up -d --no-build
 docker compose logs -f workersim
 docker compose exec workersim workersim --config /config/fleet.yaml status
@@ -123,18 +124,22 @@ worker_groups:
 
 Capacity, driver/runtime versions, and power envelopes are simulation parameters. Ascend devices report `ascend/cann` and no CUDA compute capability.
 
-Fleet examples: [50 mixed GPU workers](configs/fleet-50.yaml), [100 eight-card B300 workers](configs/fleet-100-b300.yaml), and [three eight-card 910B4 workers](configs/demo2-3-910b4.yaml).
+Fleet examples: [50 mixed GPU workers](configs/fleet-50.yaml), [100 eight-card B300 workers](configs/fleet-100-b300.yaml), [1000 eight-card B300 workers](configs/fleet-1000-b300.yaml), and [three eight-card 910B4 workers](configs/demo2-3-910b4.yaml).
 
 ### Networking and persistence
 
 | Service | Default shared-IP allocation |
 |---|---|
-| Worker API | `20100 + worker slot` |
-| Worker metrics | `20200 + worker slot` |
-| Inference pool | 64 ports per worker, starting at `40000` |
+| Worker API | `20100–21099` for 1000 workers |
+| Worker metrics | `21100–22099` for 1000 workers |
+| Inference pool | 20 ports per worker, starting at `40000` |
 | Fleet control | `127.0.0.1:20099` |
 
-At 100 workers, the inference pool spans **40000–46399**. Use distinct service pools for multiple simulator processes on one host. Optional `network.worker_ip_cidr` assigns separate worker IPs; configure host addresses and routing before startup. A Linux test-host helper is available in [`configure_virtual_network.py`](scripts/configure_virtual_network.py).
+At 1000 workers, the inference pool spans **40000–59999**. The first worker uses `40000–40019`, the last `59980–59999`. These are simulator defaults; GPUStack Server is unchanged. Model listeners are opened only for assigned workloads. Complex distributed/PD layouts may need more ports on a worker; increase `network.instance_port_end` and reduce fleet size or use separate IPs/hosts. The reservation helper accepts matching `--ports-per-worker` and `--start-port` overrides.
+
+Use distinct service pools for multiple simulator processes on one host. Optional `network.worker_ip_cidr` assigns separate worker IPs; configure host addresses and routing before startup. A Linux test-host helper is available in [`configure_virtual_network.py`](scripts/configure_virtual_network.py).
+
+For 1000 workers, mount `configs/fleet-1000-b300.yaml` as `/config/fleet.yaml` in Compose and reserve ports with `--workers 1000`. Keep `nofile=65536`; every worker needs two listeners and two persistent event connections. The example registers 10 workers/s (about 100 seconds just for pacing), staggers 30-second reports, and shares the HTTP transport while keeping authentication independent. CPU, RAM, and Server load still depend on model count and event volume; 1000-worker capacity is not a guarantee of scheduler throughput.
 
 Keep the data directory or Docker volume to preserve identities. Each namespace belongs to one Server URL and has a process lock. Fleet configuration changes require a restart; retain worker names and group order to preserve port assignments.
 
@@ -165,12 +170,12 @@ These are integration snapshots under the configurations and versions described 
 
 | Scenario | Result | Report |
 |---|---|---|
-| Original GPUStack 2.3.1 | 100 workers, 800 simulated B300 devices | [Integration](docs/workersim-040-validation.md) |
+| Original GPUStack | 100 workers, 800 simulated B300 devices | [Integration](docs/workersim-040-validation.md) |
 | GLM-5.3 PD 5P3D | Tested at 10, 20, 40, 60, 80 and 100 workers | [Scale experiment and version boundaries](docs/glm53-pd-benchmark-2026-11-17.md) |
-| GPUStack 2.3.1-ent2 | 50 B300 workers, 16 models, 116 running replicas | [Deployment acceptance](docs/demo2-deployment-2026-11-17.md) |
+| Tested GPUStack enterprise build | 50 B300 workers, 16 models, 116 running replicas | [Deployment acceptance](docs/demo2-deployment-2026-11-17.md) |
 | Ascend CANN inventory | 3 workers, 24 devices, 64 GiB each | [910B4 acceptance](docs/demo2-910b4-2026-11-17.md) |
 
-The protocol target is GPUStack **v2.3.1**, commit `458030e88718ce47bd31f7cdee9cbc8994a6760b`. Other versions need separate compatibility validation; the tested enterprise build explicitly uses `allow_version_mismatch: true`.
+Compatibility details and the protocol source commit are recorded in each [Release](https://github.com/pengjiang80/gpustack-workersim/releases). Other versions need separate validation; the tested enterprise build explicitly uses `allow_version_mismatch: true`.
 
 ## Scope and limitations
 
