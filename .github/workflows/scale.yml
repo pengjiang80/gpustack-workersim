@@ -3,7 +3,7 @@ name: Original Server scale acceptance
 on:
   workflow_dispatch:
   push:
-    branches: ['codex/scale-acceptance', 'codex/native-source-audit']
+    branches: ['codex/scale-acceptance', 'codex/native-source-audit', 'codex/scale-pool-tuned']
 
 permissions:
   contents: read
@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        workers: [500, 1000]
+        workers: ${{ fromJSON(github.ref_name == 'codex/scale-pool-tuned' && '[500]' || '[500,1000]') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -62,9 +62,15 @@ jobs:
           sudo python scripts/configure_port_reservations.py --workers ${{ matrix.workers }} --expand-ephemeral-range --apply
           docker pull gpustack/gpustack:v2.3.1
       - name: Register native B300 Workers and exercise replicas
+        env:
+          TUNED_POOL: ${{ github.ref_name == 'codex/scale-pool-tuned' }}
         run: |
           ulimit -n 65536
-          python -m scripts.scale_acceptance --workers ${{ matrix.workers }}
+          if [ "$TUNED_POOL" = "true" ]; then
+            python -m scripts.scale_acceptance --workers ${{ matrix.workers }} --external-postgres --db-pool-size 384 --db-max-overflow 128 --postgres-max-connections 768
+          else
+            python -m scripts.scale_acceptance --workers ${{ matrix.workers }}
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

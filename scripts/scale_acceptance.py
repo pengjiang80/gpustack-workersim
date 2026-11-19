@@ -61,6 +61,8 @@ def main():
     parser.add_argument("--db-pool-size", type=int, default=80)
     parser.add_argument("--db-max-overflow", type=int, default=10)
     parser.add_argument("--db-pool-timeout", type=int, default=120)
+    parser.add_argument("--external-postgres", action="store_true")
+    parser.add_argument("--postgres-max-connections", type=int, default=768)
     args = parser.parse_args()
     if not 1 <= args.workers <= 1000:
         raise ValueError("Worker count must be 1..1000")
@@ -78,6 +80,10 @@ def main():
         "registration_rate": 10, "host_cpu_count": os.cpu_count(),
         "db_pool_size": args.db_pool_size, "db_max_overflow": args.db_max_overflow,
         "db_pool_timeout": args.db_pool_timeout,
+        "external_postgres": args.external_postgres,
+        "postgres_max_connections": (
+            args.postgres_max_connections if args.external_postgres else None
+        ),
     }
     with tempfile.TemporaryDirectory(prefix="workersim-scale-") as temp:
         private = Path(temp)
@@ -90,6 +96,38 @@ def main():
             report["worker_source_audit"] = audit_image(
                 f"gpustack/gpustack:v{TARGET_VERSION}", output
             )
+            if args.external_postgres:
+                db_password = secrets.token_urlsafe(32)
+                credentials.append(db_password)
+                db_env = private / "postgres.env"
+                db_env.write_text(
+                    "POSTGRES_USER=workersim\nPOSTGRES_DB=workersim\n"
+                    f"POSTGRES_PASSWORD={db_password}\n"
+                )
+                db_env.chmod(0o600)
+                docker(
+                    "run", "-d", "--name", name + "-db", "--env-file", str(db_env),
+                    "--shm-size", "512m", "-v", f"{name}-db:/var/lib/postgresql/data",
+                    "postgres:16-alpine", "-c", f"max_connections={args.postgres_max_connections}",
+                )
+
+                def db_ready():
+                    result = subprocess.run(
+                        ["docker", "exec", name + "-db", "pg_isready", "-U", "workersim"],
+                        capture_output=True,
+                    )
+                    return result.returncode == 0
+
+                wait_until(db_ready, timeout=120)
+                db_ip = docker(
+                    "inspect", name + "-db", "--format",
+                    "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                )
+                settings = json.loads(server_config.read_text())
+                settings["database_url"] = (
+                    f"postgresql://workersim:{db_password}@{db_ip}:5432/workersim"
+                )
+                server_config.write_text(json.dumps(settings))
             docker(
                 "run", "-d", "--name", name, "--ulimit", "nofile=65536:65536",
                 "-p", "127.0.0.1:18080:80", "-v", f"{name}:/var/lib/gpustack",
@@ -195,6 +233,17 @@ def main():
                 )
             except subprocess.CalledProcessError:
                 pass
+            if args.external_postgres:
+                try:
+                    activity = docker(
+                        "exec", name + "-db", "psql", "-U", "workersim", "-d", "workersim",
+                        "-At", "-c", "SELECT json_build_object('state',state,'wait_type',"
+                        "wait_event_type,'wait_event',wait_event,'count',count(*)) "
+                        "FROM pg_stat_activity GROUP BY state,wait_event_type,wait_event;",
+                    )
+                    (output / "database-activity.jsonl").write_text(activity + "\n")
+                except subprocess.CalledProcessError:
+                    pass
             if process is not None and process.poll() is None:
                 process.terminate()
                 try:
@@ -225,7 +274,10 @@ def main():
                 for credential in credentials:
                     logs = logs.replace(credential, "[redacted]")
                 (output / "worker.log").write_text(logs)
-            for command in (("rm", "-f", name), ("volume", "rm", name)):
+            cleanup = [("rm", "-f", name), ("volume", "rm", name)]
+            if args.external_postgres:
+                cleanup.extend([("rm", "-f", name + "-db"), ("volume", "rm", name + "-db")])
+            for command in cleanup:
                 subprocess.run(
                     ["docker", *command], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )

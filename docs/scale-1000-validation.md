@@ -10,20 +10,31 @@
 `127.0.0.1:20099`。配置上限从 100 提高到 1000，并增加覆盖 8000 张 B300
 设备的配置样例。显式配置的旧端口池不会被自动覆盖。
 
-两个常驻事件连接按节点分别认证，但共享底层 HTTP 连接池，容量为
-`2 × 节点数 + 128`。注册除了速率限制，还增加默认 8 个同时启动名额。
-慢 Server 下等待发生在模拟器本地，不提前消耗请求超时时间。
+每节点 6 路独立 watch、独立连接池，1000 节点为 6000 路常驻事件连接。
+不设置跨节点 REST 限流，不共享池来降低 Server 压力。注册速率和默认 8 个
+同时启动名额仅控制 Fleet 的创建节奏。原生通信细节见
+[通信对齐说明](native-worker-communication.md)。
 
 ## 协议回归
 
-- [Linux CI](https://github.com/pengjiang80/gpustack-workersim/actions/runs/44460293508)：
-  **64 passed，45.75 秒**，包含已有普通副本、PD、分布式、文件下载与监控用例。
-- 1000 节点用例实际打开 2000 个节点监听器和 2000 路认证 watch，验证
+- [原生通信版本 Linux CI](https://github.com/pengjiang80/gpustack-workersim/actions/runs/44466111995)：
+  **69 passed，61.72 秒**，包含普通副本、PD、分布式、文件下载与监控用例。
+- 1000 节点用例实际打开 2000 个节点监听器和 6000 路认证 watch，验证
   8000 张设备、独立 token/UUID、1000 份持久化身份、全部节点的心跳上报。
 - 对第一个和最后一个节点分配模型，验证端口确实落在相应 20 端口池、
   引擎健康接口可访问、资源已分配；再验证删除回收与 1000→10→1000 在线切换。
-- 同一用例在本机 Windows 修复后通过：**1 passed，30.28 秒**，其中断言阶段
-  28.33 秒。规模验收和容器部署仍推荐 Linux。
+- 同一原生通信用例在本机 Windows 通过：**1 passed，28.25 秒**，其中断言阶段
+  24.72 秒。规模验收和容器部署仍推荐 Linux。
+- 已补上超过 64 KiB 的 Backend 事件回归，以及部署前的
+  `check_configuration=true` 校验和 Legacy 模型报告缓存路径回归。
+
+## 镜像内源码核对
+
+从实际发布镜像提取并核对 Worker、WorkerManager、RuntimeMetricsAggregator、
+ServeManager、ModelFileManager、ClientSet、ModelInstanceClient、周期任务工具、
+envs 共 9 个关键文件，SHA-256 **全部与参考 commit 一致**。
+见[审计作业](https://github.com/pengjiang80/gpustack-workersim/actions/runs/44465342694)
+和[机器可读记录](validation/native-source-audit.json)。
 
 上述为回环协议测试，控制面由测试 fixture 提供，**不包含真实 scheduler**。
 用例耗时不能作为 GPUStack 调度性能指标。
@@ -33,20 +44,18 @@
 原版 Docker 镜像 `gpustack/gpustack:v2.3.1`，拉取 digest
 `sha256:2573799fd23f9973838323e93ca0c23b41ea29b8fd8a28bdb1f12ba93c5d0f6a`。
 独立 GitHub Linux Runner，Server 容器与模拟器同机，`nofile=65536`，预留
-`40000–59999`，指定 bootstrap password 和 disable update check。
-注册速率上限 10/s，注册并发 8，心跳/状态/快照周期 30 秒。
+全部服务端口，并将测试宿主机源端口范围显式扩大为 `10240–65535`，为原生
+独立连接留足空间。指定 bootstrap password 和 disable update check。
+注册速率上限 10/s，启动并发 8；心跳/状态 30 秒，runtime metrics 3 秒、
+初始延迟 30 秒，配置缓存 300 秒，周期性全量查询默认关闭。
 
-首轮没有并发背压时，Server 注册处理速度落后于发起速度，未完成请求持续
-积压；在约 500 个节点完成注册后，后续请求触发 120 秒超时，整个 Fleet
-退出。该结果不能认定为端口上限或 Server 最多支持 500 节点。增加本地启动
-队列和并发名额后重跑，结果见下方最终记录。
+Server 使用文档支持的环境变量：`GPUSTACK_DB_POOL_SIZE=80`、
+`GPUSTACK_DB_MAX_OVERFLOW=10`、`GPUSTACK_DB_POOL_TIMEOUT=120`。
+分别验证 500 和 1000 节点，每节点 8 卡 B300，并执行小规模 2→1→0 副本场景。
 
-第二轮将同时启动数量限制为 8，继续推进至约 810 个节点、1612 路 watch，
-随后 Server 返回 HTTP 500。Server 日志明确出现
-`QueuePool limit of size 30 overflow 20 reached ... timeout 30.00`。
-因此进一步将 Fleet 的普通 REST 与 watch 握手总并发限制为 16；已建立的
-watch 不占用该名额，所有节点仍保留两路常驻连接。该限流可通过
-`server.request_concurrency` 调整，未修改 Server 的数据库配置或代码。
+早期诊断曾出现注册请求积压和默认 30+20 数据库池耗尽；当时的模拟器还只有
+双 watch，并包含额外全量轮询，因此这些结果**不用于推断原生 Worker 的节点上限**。
+随后撤销了全局 REST 限流与共享连接池，按源码补齐当前通信行为，再独立验收。
 
 最终记录待验收完成后填写。
 
@@ -56,3 +65,4 @@ watch 不占用该名额，所有节点仍保留两路常驻连接。该限流�
 增加单节点端口数时，应同步预留脚本参数，并减少同 IP 节点数量或拆分
 IP/主机。1000 节点容量与重型模型、PD 组合搜索的 scheduler 性能应分别验证。
 本次不是长期稳定性、1000 模型并发部署或推理性能测试。
+Benchmark/Cache Service 保留订阅压力，尚未模拟执行引擎。
