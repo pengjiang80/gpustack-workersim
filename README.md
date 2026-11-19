@@ -17,7 +17,7 @@ WorkerSim has its own product version. See [Releases](https://github.com/pengjia
 ## Features
 
 - **Independent identities:** worker registration, credentials, heartbeat, authenticated APIs, and persistent identities across restarts.
-- **Configurable hardware:** worker count, accelerator profile, cards per worker, CPU, RAM, disk, and labels. Supports NVIDIA GPUs and Ascend CANN NPUs.
+- **Configurable hardware:** worker count, accelerator profiles with custom device names and per-card memory, cards per worker, CPU, RAM, disk, and labels. Supports NVIDIA GPUs and Ascend CANN NPUs.
 - **Deployment lifecycles:** receives real assignments and reports initialization, startup, running, failure, and stop transitions.
 - **Scheduling scenarios:** ordinary replicas, cross-worker placement, PD prefill/decode/router roles, and tested vLLM/SGLang orchestration layouts with generation-fenced workload reports.
 - **Native communication:** six event watches per worker, independent HTTP connections, native heartbeat/status cadence, watch caches, reconnect replay, and authoritative cleanup checks.
@@ -73,7 +73,7 @@ Adjust the count to match the configuration. The helper preserves existing reser
 
 ```bash
 export GPUSTACK_REGISTRATION_TOKEN='<cluster-registration-token>'
-docker pull gpustack/gpustack-workersim:0.1.0
+docker pull gpustack/gpustack-workersim:0.1.1
 docker compose up -d --no-build
 docker compose logs -f workersim
 docker compose exec workersim workersim --config /config/fleet.yaml status
@@ -123,6 +123,48 @@ worker_groups:
 | `ascend-910b4-64gb` | Ascend 910B4 | 64 GiB | CANN |
 
 Capacity, driver/runtime versions, and power envelopes are simulation parameters. Ascend devices report `ascend/cann` and no CUDA compute capability.
+
+### Custom device names and memory
+
+Keep a built-in `gpu_profile` as the template and override either or both fields
+in each worker group:
+
+```yaml
+worker_groups:
+  - name_prefix: sim-custom
+    count: 10
+    gpu_profile: b300-288gb
+    gpu_name: "My Test GPU"
+    gpu_memory_gib: 144
+    gpu_count: 8
+    memory_gib: 2048
+```
+
+| Field | Meaning |
+|---|---|
+| `gpu_name` | Device name reported to GPUStack and used in monitoring labels. Must be a nonempty string; surrounding whitespace is trimmed. |
+| `gpu_memory_gib` | Total memory **per card**, in GiB (`1 GiB = 2^30 bytes`). Accepts positive finite numbers, including fractions such as `96.5`; reports whole bytes. |
+| `memory_gib` | Host RAM, independent of device memory. |
+
+Omit an override or set it to `null` to inherit that value from the template.
+Overrides apply to every card in the group and do not change other groups or the
+built-in profiles. `reserved_vram_gib` must be smaller than the effective per-card
+memory; its default is 1 GiB, so reduce it for devices with smaller capacities.
+
+Vendor, CUDA/CANN type, architecture, compute capability, driver/runtime versions,
+and power still come from the template. A new name does not select a different
+backend or architecture: choose a template suitable for the scheduling scenario.
+GPUStack receives the custom name and capacity through normal status reports;
+monitoring uses the same values. Restart WorkerSim after editing the config,
+keeping its identity volume and worker names.
+
+See the [mixed GPU/NPU example](configs/custom-gpu.yaml). To use it with Compose,
+adjust its addresses and mount it at `/config/fleet.yaml` instead of
+`configs/docker.yaml`. Validate the edited file before starting:
+
+```bash
+workersim --config configs/custom-gpu.yaml validate
+```
 
 Fleet examples: [50 mixed GPU workers](configs/fleet-50.yaml), [100 eight-card B300 workers](configs/fleet-100-b300.yaml), [1000 eight-card B300 workers](configs/fleet-1000-b300.yaml), and [three eight-card 910B4 workers](configs/demo2-3-910b4.yaml).
 

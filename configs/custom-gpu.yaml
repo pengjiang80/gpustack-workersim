@@ -1,0 +1,25 @@
+server:
+  url: http://127.0.0.1:8080
+
+network:
+  advertise_address: 172.17.0.1
+  worker_ip: 172.17.0.1
+
+simulation:
+  namespace: workersim-custom-gpu
+  data_dir: /data
+
+worker_groups:
+  - name_prefix: sim-custom-gpu
+    count: 2
+    gpu_profile: b300-288gb
+    gpu_name: "Example GPU 144GiB"
+    gpu_memory_gib: 144
+    gpu_count: 8
+    memory_gib: 2048  # Host RAM, separate from per-card GPU memory.
+  - name_prefix: sim-custom-npu
+    count: 1
+    gpu_profile: ascend-910b4-64gb
+    gpu_name: "Example NPU 96GiB"
+    gpu_memory_gib: 96
+    gpu_count: 8

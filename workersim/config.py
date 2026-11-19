@@ -139,6 +139,17 @@ class WorkerGroup:
     reserved_ram_gib: int = 2
     reserved_vram_gib: int = 1
     labels: dict = field(default_factory=dict)
+    gpu_name: str | None = None
+    gpu_memory_gib: int | float | None = None
+
+    def resolved_gpu_profile(self) -> dict:
+        """Resolve per-group overrides without changing the shared template."""
+        profile = dict(PROFILES[self.gpu_profile])
+        if self.gpu_name is not None:
+            profile["name"] = self.gpu_name.strip()
+        if self.gpu_memory_gib is not None:
+            profile["memory_gib"] = self.gpu_memory_gib
+        return profile
 
 
 @dataclass(frozen=True)
@@ -202,6 +213,19 @@ class Config:
                 raise ValueError("Worker name prefixes must contain only letters, digits, _ or -")
             if group.gpu_profile not in PROFILES:
                 raise ValueError(f"Unknown GPU profile: {group.gpu_profile}")
+            if group.gpu_name is not None and (
+                not isinstance(group.gpu_name, str) or not group.gpu_name.strip()
+            ):
+                raise ValueError("gpu_name must be a nonempty string or null")
+            if group.gpu_memory_gib is not None:
+                memory = group.gpu_memory_gib
+                try:
+                    memory_bytes = int(memory * GIB) if type(memory) in (int, float) else 0
+                except (ValueError, OverflowError):
+                    memory_bytes = 0
+                if memory_bytes <= 0:
+                    raise ValueError("gpu_memory_gib must be a positive finite number of GiB")
+            gpu = group.resolved_gpu_profile()
             integer_fields = (
                 "count",
                 "gpu_count",
@@ -219,7 +243,7 @@ class Config:
                 raise ValueError("Worker CPU, memory and disk capacities must be positive")
             if not 0 <= group.reserved_ram_gib < group.memory_gib:
                 raise ValueError("Reserved RAM must be smaller than worker memory")
-            if not 0 <= group.reserved_vram_gib < PROFILES[group.gpu_profile]["memory_gib"]:
+            if not 0 <= group.reserved_vram_gib * GIB < int(gpu["memory_gib"] * GIB):
                 raise ValueError("Reserved VRAM must be smaller than GPU memory")
             if not isinstance(group.labels, dict) or any(
                 not isinstance(k, str) or not isinstance(v, str) for k, v in group.labels.items()

@@ -71,7 +71,11 @@ jobs:
         env:
           IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: docker run --rm "$IMAGE@$DIGEST" --version
+        run: |
+          docker run --rm "$IMAGE@$DIGEST" --version
+          docker run --rm \
+            --mount type=bind,source="$PWD/configs/custom-gpu.yaml",target=/config/fleet.yaml,readonly \
+            "$IMAGE@$DIGEST" --config /config/fleet.yaml validate
       - name: Publish compatibility release
         if: github.event_name == 'push'
         env:

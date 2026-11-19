@@ -13,7 +13,7 @@ WorkerSim 使用独立产品版本。各版本支持的 GPUStack 版本见 [Rele
 ## 功能特性
 
 - 独立 Worker 注册、凭据、心跳、认证接口及身份持久化。
-- 配置节点数量、GPU/NPU 型号、卡数、CPU、内存、磁盘和标签。
+- 配置节点数量、GPU/NPU 模板、自定义设备名称和单卡显存、卡数、CPU、内存、磁盘和标签。
 - 接收真实调度结果，上报初始化、启动、运行、失败和停止状态。
 - 支持普通副本、跨 Worker、PD 分离及已验证的 vLLM/SGLang 编排布局。
 - 按原生通信方式保持每节点 6 路 watch、独立连接池、心跳/状态周期、缓存、重连重放及权威回收检查。
@@ -42,7 +42,7 @@ cd gpustack-workersim
 ```bash
 sudo python3 scripts/configure_port_reservations.py --workers 2 --apply
 export GPUSTACK_REGISTRATION_TOKEN='<集群注册Token>'
-docker pull gpustack/gpustack-workersim:0.1.0
+docker pull gpustack/gpustack-workersim:0.1.1
 docker compose up -d --no-build
 docker compose logs -f workersim
 docker compose exec workersim workersim --config /config/fleet.yaml status
@@ -88,6 +88,44 @@ worker_groups:
 | `ascend-910b4-64gb` | Ascend 910B4 | 64 GiB | CANN |
 
 容量、版本和功耗属于模拟配置，不代表真实设备的精确参数。Ascend 按 `ascend/cann` 上报，不填写 CUDA compute capability。
+
+### 自定义设备名称和单卡显存
+
+保留内置 `gpu_profile` 作为模板，每个分组可以分别覆盖名称、显存，或同时覆盖：
+
+```yaml
+worker_groups:
+  - name_prefix: sim-custom
+    count: 10
+    gpu_profile: b300-288gb
+    gpu_name: "我的测试 GPU"
+    gpu_memory_gib: 144
+    gpu_count: 8
+    memory_gib: 2048
+```
+
+| 字段 | 含义 |
+|---|---|
+| `gpu_name` | 上报给 GPUStack、用于监控标签的设备名称；必须是非空字符串，首尾空白会去除。 |
+| `gpu_memory_gib` | **每张卡**的总显存，单位 GiB（`1 GiB = 2^30 字节`）；支持有限正数，包括 `96.5` 等小数，上报为整数字节。 |
+| `memory_gib` | 主机内存，独立于单卡显存。 |
+
+字段省略或设为 `null` 时继承模板值。覆盖作用于分组内所有卡，不修改内置模板或
+其他分组。`reserved_vram_gib` 必须小于覆盖后的单卡容量；默认预留 1 GiB，
+模拟更小容量时需相应降低预留值。
+
+厂商、CUDA/CANN 类型、架构、compute capability、驱动/运行时版本、功耗等仍
+继承模板。新名称不会自动切换架构或推理后端，应选择适合调度场景的模板。
+自定义名称和显存通过正常状态上报传给 GPUStack，监控使用相同数据。
+修改配置后重启 WorkerSim，保留身份 volume 和节点名称。
+
+完整示例见 [混合 GPU/NPU 配置](configs/custom-gpu.yaml)。用于 Compose 时，
+先调整地址，再将配置挂载改为 `configs/custom-gpu.yaml:/config/fleet.yaml:ro`。
+启动前可以校验：
+
+```bash
+workersim --config configs/custom-gpu.yaml validate
+```
 
 示例：[50 个混合 GPU 节点](configs/fleet-50.yaml)、[100 个八卡 B300 节点](configs/fleet-100-b300.yaml)、[1000 个八卡 B300 节点](configs/fleet-1000-b300.yaml)、[3 个八卡 910B4 节点](configs/demo2-3-910b4.yaml)。
 

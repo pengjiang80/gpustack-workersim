@@ -5,7 +5,7 @@ import math
 import time
 from datetime import datetime, timezone
 
-from workersim.config import GIB, PROFILES, Config, WorkerSpec
+from workersim.config import GIB, Config, WorkerSpec
 
 
 def local_member(instance: dict, worker_id: int) -> dict | None:
@@ -39,7 +39,7 @@ class Hardware:
 
     def sample(self, worker_id: int, instances: dict, running_ids: set[int]) -> dict:
         group = self.spec.group
-        profile = PROFILES[group.gpu_profile]
+        profile = group.resolved_gpu_profile()
         ram, _ = self.allocated(worker_id, instances)
         active_vram = {}
         for instance_id in running_ids:
@@ -53,7 +53,7 @@ class Hardware:
         wave = (1 + math.sin(time.monotonic() / 17 + self.phase)) / 2
         devices = []
         for index in range(group.gpu_count):
-            total = profile["memory_gib"] * GIB
+            total = int(profile["memory_gib"] * GIB)
             occupied = active_vram.get(index, 0)
             load = (40 + wave * 35 + index % 5) if occupied else 0.5 + wave
             used = min(total, int(total * 0.004 + occupied * 0.92))
