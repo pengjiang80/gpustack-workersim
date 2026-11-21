@@ -82,6 +82,7 @@ class ServerConfig:
     cluster_id: int | None = None
     verify_ssl: bool = True
     request_timeout: float = 60
+    # Deprecated and ignored: like the native Worker, a version mismatch only logs a warning.
     allow_version_mismatch: bool = False
 
 
@@ -97,11 +98,19 @@ class NetworkConfig:
     instance_port_end: int = 40019
     instance_port_stride: int | None = None
     control_port: int = 20099
+    # Synthetic per-NPU RoCE addresses (native Ascend detection reports roce_ip). null disables.
+    npu_roce_cidr: str | None = "10.200.0.0/16"
 
     def ip_for_slot(self, slot: int) -> str:
         if self.worker_ip_cidr is None:
             return self.worker_ip
         return str(ip_network(self.worker_ip_cidr).network_address + slot + 1)
+
+    def roce_ip(self, slot: int, index: int) -> str | None:
+        """Stable synthetic RoCE address: 64 device slots per Worker slot."""
+        if self.npu_roce_cidr is None:
+            return None
+        return str(ip_network(self.npu_roce_cidr).network_address + slot * 64 + index + 1)
 
     def instance_ports_for_slot(self, slot: int) -> tuple[int, int]:
         stride = self.instance_port_stride
@@ -141,6 +150,11 @@ class WorkerGroup:
     labels: dict = field(default_factory=dict)
     gpu_name: str | None = None
     gpu_memory_gib: int | float | None = None
+    # Workers per multi-node NVLink domain (e.g. 18 for NVL72 with 4 GPUs/worker). Each domain
+    # reports a distinct nvidia.com/gpu.clique topology hint, like the native NVML fabric probe.
+    nvlink_domain_workers: int | None = None
+    # Reported verbatim as WorkerStatus.kv_transfer_ifname (native --kv-transfer-ifname).
+    kv_transfer_ifname: str | None = None
 
     def resolved_gpu_profile(self) -> dict:
         """Resolve per-group overrides without changing the shared template."""
@@ -157,6 +171,7 @@ class WorkerSpec:
     name: str
     slot: int
     group: WorkerGroup
+    group_index: int = 0
 
 
 @dataclass
@@ -170,7 +185,11 @@ class Config:
         result = []
         for group in self.worker_groups:
             for number in range(1, group.count + 1):
-                result.append(WorkerSpec(f"{group.name_prefix}-{number:03d}", len(result), group))
+                result.append(
+                    WorkerSpec(
+                        f"{group.name_prefix}-{number:03d}", len(result), group, number - 1
+                    )
+                )
         return result
 
     def validate(self) -> None:
@@ -245,6 +264,15 @@ class Config:
                 raise ValueError("Reserved RAM must be smaller than worker memory")
             if not 0 <= group.reserved_vram_gib * GIB < int(gpu["memory_gib"] * GIB):
                 raise ValueError("Reserved VRAM must be smaller than GPU memory")
+            domain = group.nvlink_domain_workers
+            if domain is not None and (type(domain) is not int or domain < 1):
+                raise ValueError("nvlink_domain_workers must be a positive integer or null")
+            if domain is not None and gpu.get("vendor") != "NVIDIA":
+                raise ValueError("nvlink_domain_workers requires an NVIDIA GPU profile")
+            if group.kv_transfer_ifname is not None and not isinstance(
+                group.kv_transfer_ifname, str
+            ):
+                raise ValueError("kv_transfer_ifname must be a string or null")
             if not isinstance(group.labels, dict) or any(
                 not isinstance(k, str) or not isinstance(v, str) for k, v in group.labels.items()
             ):
@@ -265,6 +293,12 @@ class Config:
                 raise ValueError("network.worker_ip_cidr must be a private or loopback IPv4 subnet")
             if network.num_addresses - 2 < count:
                 raise ValueError("network.worker_ip_cidr has insufficient usable node addresses")
+        if n.npu_roce_cidr is not None:
+            roce = ip_network(n.npu_roce_cidr)
+            if not isinstance(roce, IPv4Network):
+                raise ValueError("network.npu_roce_cidr must be an IPv4 subnet or null")
+            if roce.num_addresses - 2 < count * 64:
+                raise ValueError("network.npu_roce_cidr has insufficient addresses for all NPUs")
         ports = [
             n.control_port,
             *range(n.api_port_base, n.api_port_base + count),

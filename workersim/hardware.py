@@ -1,11 +1,27 @@
 """Synthetic observations driven by the Server's assigned resource claims."""
 
 import hashlib
+import ipaddress
 import math
 import time
+import uuid
 from datetime import datetime, timezone
 
 from workersim.config import GIB, Config, WorkerSpec
+
+NVIDIA_CLIQUE_KEY = "nvidia.com/gpu.clique"
+
+
+def facts_from_devices(devices) -> dict:
+    """Native topology_facts fold: claim a domain only when all reporting cards agree."""
+    facts = {}
+    values = {
+        (d.get("topology_hints") or {}).get(NVIDIA_CLIQUE_KEY)
+        for d in devices or []
+    } - {None, ""}
+    if len(values) == 1:
+        facts[NVIDIA_CLIQUE_KEY] = values.pop()
+    return facts
 
 
 def local_member(instance: dict, worker_id: int) -> dict | None:
@@ -24,6 +40,16 @@ class Hardware:
         self.started = time.time()
         digest = hashlib.sha256(f"{config.simulation.seed}/{spec.name}".encode()).digest()
         self.phase = int.from_bytes(digest[:4], "big") / 2**32 * 2 * math.pi
+        group = spec.group
+        self.topology_hints = {}
+        if group.nvlink_domain_workers:
+            # Native hint: f"{fabric_cluster_uuid}.{fabric_clique_id}"; one fabric per domain.
+            domain = spec.group_index // group.nvlink_domain_workers
+            fabric = uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"workersim:{config.simulation.namespace}:{group.name_prefix}:{domain}",
+            )
+            self.topology_hints = {NVIDIA_CLIQUE_KEY: f"{fabric}.0"}
 
     def allocated(self, worker_id: int, instances: dict) -> tuple[int, dict[int, int]]:
         ram, vram = 0, {}
@@ -76,6 +102,26 @@ class Hardware:
                     "power_used": round(profile["power"] * (0.12 + load * 0.008), 1),
                 }
             )
+            if self.topology_hints:
+                devices[-1]["topology_hints"] = dict(self.topology_hints)
+            roce = (
+                self.config.network.roce_ip(self.spec.slot, index)
+                if profile["vendor"] == "ascend"
+                else None
+            )
+            if roce:
+                # Native Ascend detection reports status "up" only with a RoCE address.
+                devices[-1]["network"] = {
+                    "status": "up",
+                    "inet": roce,
+                    "netmask": str(
+                        ipaddress.ip_network(self.config.network.npu_roce_cidr).netmask
+                    ),
+                    "mac": "",
+                    "gateway": "",
+                    "iface": None,
+                    "mtu": None,
+                }
         total_ram = group.memory_gib * GIB
         used_ram = min(total_ram, int(total_ram * (0.08 + wave * 0.01) + ram * 0.8))
         disk_total = group.disk_gib * GIB
@@ -112,4 +158,6 @@ class Hardware:
                 "boot_time": datetime.fromtimestamp(self.started, timezone.utc).isoformat(),
             },
             "gpu_devices": devices,
+            "topology_facts": facts_from_devices(devices) or None,
+            "kv_transfer_ifname": group.kv_transfer_ifname,
         }

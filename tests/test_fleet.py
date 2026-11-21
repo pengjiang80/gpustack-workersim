@@ -2,7 +2,7 @@ import asyncio
 
 import aiohttp
 import pytest
-from conftest import eventually
+from conftest import eventually, model_metrics
 
 from workersim.fleet import Fleet
 
@@ -23,6 +23,8 @@ async def test_deploy_metrics_scale_down_and_restore_identity(
         worker = fleet.workers[0]
         await eventually(lambda: 10 in worker.runtime.running_ids)
         port = worker.runtime.records[10].port
+        # Native aggregation runs 30 s after registration; run one pass now.
+        await worker.runtime_metrics.aggregate()
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 f"http://127.0.0.1:{config.network.metrics_port_base}/metrics"
@@ -48,9 +50,8 @@ async def test_deploy_metrics_scale_down_and_restore_identity(
         await eventually(lambda: not worker.runtime.records)
         assert worker.runtime.port_key(port) not in fleet.ports
         assert worker.hardware.allocated(worker.worker_id, worker.instances) == (0, {})
-        from workersim.model_metrics import render_models
-
-        assert render_models(worker) == ""
+        
+        assert await model_metrics(worker) == ""
         if managed:
             assert any("preparation" in r for r in control_plane.managed_reports)
             assert any("observations" in r for r in control_plane.managed_reports)

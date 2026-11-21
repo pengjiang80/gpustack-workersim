@@ -168,6 +168,7 @@ class Runtime:
         if accepted:
             await self.release(record)
             record.phase = "error"
+            self.worker.error_instances[record.instance["id"]] = record.instance
 
     async def current(self, record, *, authoritative=False, check_configuration=False):
         latest = None
@@ -411,6 +412,7 @@ class Runtime:
             ):
                 await self.release(record)
                 record.phase = "error"
+                self.worker.error_instances[instance["id"]] = record.instance
             return
         if record.phase == "running":
             if managed(instance):
@@ -510,6 +512,9 @@ class Runtime:
 
     def ready(self, record):
         record.phase = "running"
+        # Native health sync clears restart backoff once the instance serves again.
+        if hasattr(self.worker, "restart_backoff"):
+            self.worker.restart_backoff.pop(record.instance["id"], None)
         record.traffic = SyntheticTraffic(
             record.instance["id"] + record.generation + self.worker.config.simulation.seed,
             self.worker.config.simulation.model_requests_per_second,

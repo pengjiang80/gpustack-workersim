@@ -32,4 +32,4 @@ select = ["E", "F", "I", "B", "ASYNC"]
 
 [tool.setuptools.package-data]
 "workersim._vendor" = ["*.txt", "*.md"]
-"workersim" = ["data/*.json"]
+"workersim" = ["data/*.json", "data/*.yaml"]

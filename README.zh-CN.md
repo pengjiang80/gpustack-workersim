@@ -6,21 +6,21 @@
 
 WorkerSim 是独立的 **GPUStack Worker 协议模拟器**，无需修改 Server 或 UI。Linux 下单进程最多管理 **1000 个独立节点**，每个节点拥有自己的身份、心跳、事件订阅、HTTP 接口和监控端口。
 
-WorkerSim 使用独立产品版本。各版本支持的 GPUStack 版本见 [Releases](https://github.com/pengjiang80/gpustack-workersim/releases)，启动时会检查协议兼容性。
+WorkerSim 使用独立产品版本。各版本支持的 GPUStack 版本见 [Releases](https://github.com/pengjiang80/gpustack-workersim/releases)，启动时会像原生 Worker 一样检查 Server 版本，版本不一致只记录警告，不阻止启动。
 
 调度由真实 GPUStack Server 执行，WorkerSim 接收任务并模拟节点行为。无需真实 GPU、模型权重或推理引擎，监控指标均为合成数据。
 
 ## 功能特性
 
 - 独立 Worker 注册、凭据、心跳、认证接口及身份持久化。
-- 配置节点数量、GPU/NPU 模板、自定义设备名称和单卡显存、卡数、CPU、内存、磁盘和标签。
+- 配置节点数量、GPU/NPU 模板、自定义设备名称和单卡显存、卡数、CPU、内存、磁盘和标签，并上报 NVLink 域拓扑事实和每张 NPU 的 RoCE 地址。
 - 接收真实调度结果，上报初始化、启动、运行、失败和停止状态。
 - 支持普通副本、跨 Worker、PD 分离及已验证的 vLLM/SGLang 编排布局。
-- 按原生通信方式保持每节点 6 路 watch、独立连接池、心跳/状态周期、缓存、重连重放及权威回收检查。
+- 按原生通信方式保持每节点 6 路 watch、独立连接池、心跳/状态周期、缓存、重连重放、权威回收检查、孤儿负载清理和 runtime metrics 读取，使 Server 压力与真实 Worker 一致。
 - 模拟文件下载进度、Ready 状态、虚拟路径和合成大小。
-- 上报 GPU 使用与分配、温度、功耗、模型请求与 Token、延迟及部分 KV/PD 指标。
+- 上报 Worker 节点指标，并以 vLLM、SGLang、MindIE、PD Router 和 SGLang 网关的原生指标名暴露引擎指标；Worker 按 Server 的 `/v2/metrics/config` 归一化，与 GPUStack runtime metrics 聚合器一致。
 - 提供模拟聊天、流式聊天、embedding、rerank、语音转写和静音 WAV。
-- 模拟节点离线及实例故障，通过 GPUStack 正常机制验证恢复。
+- 模拟节点离线及实例故障，通过 GPUStack 正常机制验证恢复，包括 Worker 对 `restart_on_error` 模型按指数退避（10 秒起翻倍，最长 300 秒）重启实例。
 
 ## Docker 快速启动
 
@@ -93,6 +93,14 @@ worker_groups:
 
 容量、版本和功耗属于模拟配置，不代表真实设备的精确参数。Ascend 按 `ascend/cann` 上报，不填写 CUDA compute capability。
 
+### 拓扑与设备网络
+
+| 字段 | 位置 | 含义 |
+|---|---|---|
+| `nvlink_domain_workers` | worker group | 每个多节点 NVLink 域的 Worker 数，仅 NVIDIA。每张卡上报 `nvidia.com/gpu.clique` 拓扑提示（`<fabric-uuid>.0`），Worker 上报一致的 `topology_facts`，与原生 NVML fabric 探测一致。单机 HGX 不上报域，应省略。 |
+| `kv_transfer_ifname` | worker group | 原样上报为 `kv_transfer_ifname`，对应原生 `--kv-transfer-ifname`。 |
+| `npu_roce_cidr` | `network` | 合成 NPU RoCE 地址段（默认 `10.200.0.0/16`，每个 Worker 槽位 64 个地址）。Ascend 设备以该地址上报 `network.status: up`，MindIE 分布式放置需要该信息。设为 `null` 则不上报设备网络。 |
+
 ### 自定义设备名称和单卡显存
 
 保留内置 `gpu_profile` 作为模板，每个分组可以分别覆盖名称、显存，或同时覆盖：
@@ -150,7 +158,7 @@ workersim --config configs/custom-gpu.yaml validate
 
 每节点保持 **6 路常驻 watch** 和独立连接池。心跳与状态启动后立即发送，每次完成后间隔 30 秒；Runtime metrics 保留原生查询 Worker 的周期。不设置跨节点 REST 限流，也不共享连接池来降低 Server 压力。请求、缓存、重连与执行范围见[原生通信说明](docs/native-worker-communication.md)。
 
-示例每秒最多启动 10 个节点，同时启动名额为 8，这两个参数只控制建起 Fleet 的节奏。保留 `reconcile_interval: 0` 使用原生 watch 缓存行为。实际 CPU、内存和 Server/数据库压力取决于模型数与事件量；模拟器支持 1000 节点不代表调度吞吐保证，验收可使用 GPUStack 文档中的数据库池参数调整 Server。
+默认每秒最多启动 5 个节点（`registration_rate`），同时启动名额为 8（`registration_concurrency`），这两个参数只控制建起 Fleet 的节奏。保留 `reconcile_interval: 0` 使用原生 watch 缓存行为。实际 CPU、内存和 Server/数据库压力取决于模型数与事件量；模拟器支持 1000 节点不代表调度吞吐保证，验收可使用 GPUStack 文档中的数据库池参数调整 Server。
 
 同主机多个进程应使用不同端口池。独立 IP 可通过 `network.worker_ip_cidr` 配置，并先准备宿主机地址和路由；可参考 [`configure_virtual_network.py`](scripts/configure_virtual_network.py)。
 
@@ -184,9 +192,11 @@ workersim --config configs/local.yaml stop
 - 已测企业版：[50 个 B300 Worker、16 个模型、116 个 Running 副本验收快照](docs/demo2-deployment-2026-11-17.md)。
 - Ascend：[3 个 Worker、24 张 64 GiB 设备及监控、双 watch、重启恢复](docs/demo2-910b4-2026-11-17.md)。
 
-兼容版本和协议来源 commit 在每个 [Release](https://github.com/pengjiang80/gpustack-workersim/releases) 中说明。其他版本需要单独验证，已测试企业版显式启用 `allow_version_mismatch`。
+兼容版本和协议来源 commit 在每个 [Release](https://github.com/pengjiang80/gpustack-workersim/releases) 中说明。其他版本需要单独验证。`server.allow_version_mismatch` 已废弃并被忽略：与原生 Worker 一样，版本不一致只记录警告。
 
-不执行真实推理、权重下载、GPU kernel、NCCL/Ray 或 KV 数据传输。embedding 为测试向量，rerank 使用固定顺序，转写返回模拟提示，TTS 固定返回 **0.25 秒静音 WAV**。指标不能用于真实推理性能、请求审计或计费。
+不执行真实推理、权重下载、GPU kernel、NCCL/Ray 或 KV 数据传输。embedding 为测试向量，rerank 使用固定顺序，转写返回模拟提示，TTS 固定返回 **0.25 秒静音 WAV**。指标不能用于真实推理性能、请求审计或计费。模型指标在原生的 30 秒聚合延迟后出现，最后一次成功聚合 30 秒后过期。
+
+Benchmark 与 Cache Service 按原生方式订阅和轮询，但不模拟其执行和日志（`/benchmark_logs`、`/cacheServiceInstanceLogs`）；也不模拟 tunnel 代理模式、`/cluster-proxy` 和 GGUF 解析。Managed（workload-report）实例由 Server 驱动恢复，WorkerSim 不执行其原生 managed workload 同步。
 
 部分企业版实例可能残留历史下载百分比；模型文件 Ready/100% 与实例 Running 的验证结果见报告。资源放置和调度始终由 Server 决定，未验证所有 backend/layout 组合。
 
