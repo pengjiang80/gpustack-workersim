@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gpustack-workersim"
-version = "0.1.1"
+version = "0.1.2"
 description = "CPU-only Worker protocol simulator for unmodified GPUStack"
 requires-python = ">=3.11"
 dependencies = ["aiohttp>=3.10,<4", "PyYAML>=6,<7"]

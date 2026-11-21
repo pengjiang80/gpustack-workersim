@@ -1,6 +1,6 @@
 """GPUStack 2.3.1 Worker protocol simulation, with no GPUStack runtime dependency."""
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 TARGET_VERSION = "2.3.1"
 # Build string a release image reports (/version, worker_version): the git tag.
 NATIVE_VERSION = "v" + TARGET_VERSION

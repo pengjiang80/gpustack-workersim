@@ -28,18 +28,18 @@ Docker Hub 组织命名空间可以与登录账号不同。令牌放在 GitHub S
 
 ```bash
 git push origin main
-git tag -a v0.1.1-gpustack2.3.1 -m 'WorkerSim 0.1.1 / GPUStack 2.3.1'
-git push origin v0.1.1-gpustack2.3.1
+git tag -a v0.1.2-gpustack2.3.1 -m 'WorkerSim 0.1.2 / GPUStack 2.3.1'
+git push origin v0.1.2-gpustack2.3.1
 ```
 
-镜像同时发布 `${DOCKERHUB_IMAGE}:0.1.1` 和 `${DOCKERHUB_IMAGE}:0.1.1-gpustack2.3.1`，两者指向相同构建。协议版本与 commit 也写入 OCI label。工作流会在 Docker Hub 按 digest 拉取已发布的镜像，运行 `--version` 并校验自定义设备配置示例，然后使用 `docs/releases/{产品版本}.md` 创建 GitHub Release。标签与源码元数据不一致时终止发布。
+镜像同时发布 `${DOCKERHUB_IMAGE}:0.1.2` 和 `${DOCKERHUB_IMAGE}:0.1.2-gpustack2.3.1`，两者指向相同构建。协议版本与 commit 也写入 OCI label。工作流会在 Docker Hub 按 digest 拉取已发布的镜像，运行 `--version` 并校验自定义设备配置示例，然后使用 `docs/releases/{产品版本}.md` 创建 GitHub Release。标签与源码元数据不一致时终止发布。
 
 0.1.0 开始采用公开产品版本序列，早期 0.4.x 开发标签保留。后续小幅更新继续递增补丁号，例如 0.1.2，较大功能迭代可用 0.2.0；升级 GPUStack 协议时同时调整兼容后缀、来源 commit 和 Release 兼容表，不复用已发布的标签。
 
 也可以在 GitHub Actions 中手动运行 `Publish Docker image`。默认仅发布版本号标签；勾选 `Also update the latest image tag` 后才更新 `latest`。
 
 镜像仓库迁移时，在 `source_tag` 填入既有 Release 标签，例如
-`v0.1.1-gpustack2.3.1`。工作流使用当前流程定义、检出该标签的原始源码构建，
+`v0.1.2-gpustack2.3.1`。工作流使用当前流程定义、检出该标签的原始源码构建，
 并将实际检出提交写入 OCI revision；不移动 Git 标签，也不重新创建已有 Release。
 发布前检查目标仓库变量，发布后按 digest 拉取镜像并验证版本和配置。公开仓库
 仍需令牌对新目标具有 push 权限。更改仓库名不会自动迁移旧仓库里的镜像或标签。

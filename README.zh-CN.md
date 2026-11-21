@@ -42,7 +42,7 @@ cd gpustack-workersim
 ```bash
 sudo python3 scripts/configure_port_reservations.py --workers 2 --apply
 export GPUSTACK_REGISTRATION_TOKEN='<集群注册Token>'
-docker pull gpustack/workersim:0.1.1
+docker pull gpustack/workersim:0.1.2
 docker compose up -d --no-build
 docker compose logs -f workersim
 docker compose exec workersim workersim --config /config/fleet.yaml status

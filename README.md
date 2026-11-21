@@ -73,7 +73,7 @@ Adjust the count to match the configuration. The helper preserves existing reser
 
 ```bash
 export GPUSTACK_REGISTRATION_TOKEN='<cluster-registration-token>'
-docker pull gpustack/workersim:0.1.1
+docker pull gpustack/workersim:0.1.2
 docker compose up -d --no-build
 docker compose logs -f workersim
 docker compose exec workersim workersim --config /config/fleet.yaml status
