@@ -118,8 +118,8 @@ async def test_status_reports_topology_npu_network_and_kv_ifname(
         WorkerGroup(name_prefix="npu", count=1, gpu_count=2, gpu_profile="ascend-910b4-64gb",
                     reserved_vram_gib=1),
     ]
-    config.network.api_port_base = 34100
-    config.network.metrics_port_base = 34200
+    config.network.api_port_base = 32500
+    config.network.metrics_port_base = 32600
     config.validate()
     fleet = Fleet(config)
     task = asyncio.create_task(fleet.run())
