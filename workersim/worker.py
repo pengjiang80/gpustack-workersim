@@ -3,10 +3,11 @@
 import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 
 import aiohttp
 
-from workersim import TARGET_VERSION
+from workersim import NATIVE_VERSION
 from workersim.client import APIError, Client, cancel_tasks
 from workersim.config import GIB
 from workersim.hardware import Hardware, local_member
@@ -14,7 +15,6 @@ from workersim.http_server import listen, metrics_app, worker_app
 from workersim.model_files import ModelFiles
 from workersim.native_contract import (
     CACHE_PROVIDER_INTERVAL,
-    METRICS_CONFIG_TTL,
     REGISTER_ATTEMPTS,
     REGISTER_RETRY_SECONDS,
     RUNTIME_METRICS_INITIAL_DELAY,
@@ -24,9 +24,27 @@ from workersim.native_contract import (
     WATCH_RESOURCES,
 )
 from workersim.port_reservations import PortReservations
-from workersim.runtime import Runtime
+from workersim.runtime import Runtime, managed
+from workersim.runtime_metrics import RuntimeMetricsAggregator
 
 log = logging.getLogger(__name__)
+
+# Native WorkloadCleaner.cleanup_orphan_workloads: run_periodically_in_thread(..., 120, 15).
+ORPHAN_CLEANUP_INTERVAL = 120
+ORPHAN_CLEANUP_INITIAL_DELAY = 15
+# Native ServeManager.watch_model_instances restart loop period and backoff ceiling.
+ERROR_RESTART_LOOP_SECONDS = 10
+ERROR_RESTART_MAX_DELAY = 300
+
+
+def _timestamp(value):
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 class VirtualWorker:
@@ -43,6 +61,11 @@ class VirtualWorker:
         self.runtime = Runtime(self)
         self.model_files = ModelFiles(self)
         self.port_reservations = PortReservations(self)
+        self.runtime_metrics = RuntimeMetricsAggregator(self)
+        self.error_instances: dict[int, dict] = {}
+        self.restart_backoff: dict[int, int] = {}
+        self.restarts_requested = 0
+        self.orphan_cleanups = 0
         self.instances: dict[int, dict] = {}
         self.online = True
         self.watch_connected = False
@@ -80,14 +103,7 @@ class VirtualWorker:
 
     async def start(self, registration_token):
         self.registration_token = registration_token or self.registration_token
-        probe = await Client(self.config.server, "").open()
-        try:
-            version = await probe.request("GET", "/version", root=True, timeout=5)
-        finally:
-            await probe.close()
-        actual = str(version.get("version", "")).removeprefix("v")
-        if actual != TARGET_VERSION and not self.config.server.allow_version_mismatch:
-            raise ValueError(f"Expected GPUStack {TARGET_VERSION}, received {actual!r}")
+        await self.check_server_version()
         n = self.config.network
         self.listeners.append(
             await listen(worker_app(self), n.bind_host, n.api_port_base + self.spec.slot)
@@ -123,11 +139,41 @@ class VirtualWorker:
             asyncio.create_task(self.auxiliary_reports("providers", CACHE_PROVIDER_INTERVAL, 0)),
             asyncio.create_task(self.auxiliary_reports("benchmarks", STATE_SYNC_INTERVAL, 15)),
             asyncio.create_task(self.auxiliary_reports("cache-services", STATE_SYNC_INTERVAL, 3)),
+            asyncio.create_task(self.auxiliary_reports(
+                "orphan-cleanup", ORPHAN_CLEANUP_INTERVAL, ORPHAN_CLEANUP_INITIAL_DELAY
+            )),
+            asyncio.create_task(self.restart_error_instances()),
             *[asyncio.create_task(self.watch(resource)) for resource in WATCH_RESOURCES],
         ]
         self.tasks.extend(later_tasks)
         for task in later_tasks:
             task.add_done_callback(self.background_done)
+
+    async def check_server_version(self):
+        """Native WorkerManager.check_server_version: warn on mismatch, never block startup."""
+        probe = await Client(self.config.server, "").open()
+        try:
+            version = await probe.request("GET", "/version", root=True, timeout=5)
+        except APIError as error:
+            if error.status == 404:
+                log.warning("Server does not support version check.")
+            else:
+                log.error("Failed to fetch server version: %s", error)
+            return
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
+            log.error("Server version check failed: %s", type(error).__name__)
+            return
+        finally:
+            await probe.close()
+        server = str((version or {}).get("version", "unknown"))
+        if server in (NATIVE_VERSION, "0.0.0"):
+            log.info("Version check passed: worker %s matches server %s", NATIVE_VERSION, server)
+            return
+        log.warning(
+            "Version mismatch detected:\n  Worker version: %s\n  Server version: %s "
+            "(commit: %s)\n\nPlease upgrade your worker to match the server version.",
+            NATIVE_VERSION, server, (version or {}).get("git_commit", "unknown"),
+        )
 
     async def register(self, registration_token):
         # A bound Worker re-registers using its own credential, as required by ownership checks.
@@ -138,7 +184,7 @@ class VirtualWorker:
         try:
             body = self.status_payload() | {
                 "name": self.spec.name,
-                "worker_version": TARGET_VERSION,
+                "worker_version": NATIVE_VERSION,
                 "labels": {
                     **self.spec.group.labels,
                     "os": "Linux",
@@ -152,6 +198,7 @@ class VirtualWorker:
                 body["cluster_id"] = self.config.server.cluster_id
             # Native initial collection detects system info; GPU detection is in the first status.
             body["status"]["gpu_devices"] = None
+            body["status"]["topology_facts"] = None
             result = await register.request("POST", "/workers", body=body)
         finally:
             await register.close()
@@ -245,8 +292,14 @@ class VirtualWorker:
                         continue
                     if kind == "DELETED":
                         self.instances.pop(key, None)
+                        self.error_instances.pop(key, None)
                     elif local_member(data, self.worker_id) is not None:
                         self.instances[key] = data
+                        if kind == "UPDATED" and data.get("state") == "error":
+                            # Native: UPDATED ERROR events queue the restart handler.
+                            self.error_instances[key] = data
+                        elif data.get("state") == "running":
+                            self.error_instances.pop(key, None)
                     else:
                         self.instances.pop(key, None)
             except (
@@ -309,28 +362,20 @@ class VirtualWorker:
     async def auxiliary_reports(self, kind, interval, initial_delay):
         """Native idle-worker REST traffic; local engine metric collection stays synthetic."""
         await asyncio.sleep(initial_delay)
-        config_due = 0
         while True:
             if self.online:
                 try:
                     if kind == "providers":
                         await self.client.request("GET", "/cache-providers", params={"page": 0})
                     elif kind == "runtime-metrics":
-                        if time.monotonic() >= config_due:
-                            try:
-                                await self.client.request("GET", "/metrics/config", timeout=2)
-                            except (APIError, aiohttp.ClientError, asyncio.TimeoutError):
-                                # Native aggregator also falls back to its built-in config.
-                                pass
-                            config_due = time.monotonic() + METRICS_CONFIG_TTL
-                        await self.client.request("GET", f"/workers/{self.worker_id}")
-                        if not self.watch_states["models"]:
-                            await self.client.request("GET", "/models")
-                        if not self.watch_connected:
-                            await self.client.request(
-                                "GET", "/model-instances",
-                                params={"cluster_id": self.identity["cluster_id"]},
-                            )
+                        await self.runtime_metrics.aggregate()
+                    elif kind == "orphan-cleanup" and self.runtime.records:
+                        # Native list_workloads() sees this Worker's model containers, so it
+                        # reads the full uncached instance list to find orphans.
+                        await self.client.request(
+                            "GET", "/model-instances", params={"page": -1}
+                        )
+                        self.orphan_cleanups += 1
                     elif kind == "benchmarks" and not self.watch_states["benchmarks"]:
                         await self.client.request(
                             "GET", "/benchmarks",
@@ -342,11 +387,92 @@ class VirtualWorker:
                         await self.client.request(
                             "GET", "/cache-service-instances", params={"worker_id": self.worker_id}
                         )
-                except (APIError, aiohttp.ClientError, asyncio.TimeoutError) as error:
+                except (APIError, aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
                     self.report_errors += 1
                     self.last_error = str(error) or type(error).__name__
                 await asyncio.sleep(0)  # let independent heartbeat/status tasks run
             await asyncio.sleep(interval)
+
+    async def restart_error_instances(self):
+        """Native ServeManager.watch_model_instances: restart ERROR instances with backoff."""
+        while True:
+            if self.online:
+                for instance in list(self.error_instances.values()):
+                    try:
+                        await self.restart_error_instance(instance)
+                    except (APIError, aiohttp.ClientError, asyncio.TimeoutError) as error:
+                        self.report_errors += 1
+                        self.last_error = str(error) or type(error).__name__
+            await asyncio.sleep(ERROR_RESTART_LOOP_SECONDS)
+
+    @staticmethod
+    def restart_pending(instance, delay, now):
+        last = _timestamp(instance.get("last_restart_time") or instance.get("updated_at"))
+        return bool(delay and last and (now - last).total_seconds() < delay)
+
+    async def restart_error_instance(self, instance):
+        key = instance["id"]
+        servers = instance.get("distributed_servers") or {}
+        if servers.get("legacy_stop") or managed(instance):
+            # Stops and managed recovery are driven by the runtime and the Server.
+            self.error_instances.pop(key, None)
+            return
+        if servers.get("group_recovery"):
+            return  # Native group recovery is coordinated by the Server.
+        count = self.restart_backoff.get(key, 0)
+        delay = min(10 * 2 ** (count - 1), ERROR_RESTART_MAX_DELAY) if count else 0
+        now = datetime.now(timezone.utc)
+        if self.restart_pending(instance, delay, now):
+            return
+        try:
+            # Native bypasses the watch cache to confirm the error still exists.
+            current = await self.client.request("GET", f"/model-instances/{key}")
+        except APIError as error:
+            if error.status == 404:
+                self.error_instances.pop(key, None)
+                return
+            raise
+        member = local_member(current, self.worker_id)
+        subordinate_error = any(
+            m.get("worker_id") == self.worker_id and m.get("state") == "error"
+            for m in (current.get("distributed_servers") or {}).get("subordinate_workers") or []
+        )
+        if member is None or (current.get("state") != "error" and not subordinate_error):
+            self.error_instances.pop(key, None)
+            return
+        if self.restart_pending(current, delay, now):
+            return
+        model = None
+        if not current.get("group_id"):
+            model = self.watch_caches["models"].get(current.get("model_id"))
+        if model is None:
+            try:
+                model = await self.client.request("GET", f"/models/{current['model_id']}")
+            except APIError as error:
+                if error.status != 404:
+                    raise
+        if not model or model.get("restart_on_error") is False or (
+            current.get("group_id") and model.get("stale") is True
+        ):
+            self.error_instances.pop(key, None)
+            return
+        log.info(
+            "%s restarting model instance %s (attempt %s) after %ss",
+            self.spec.name, current.get("name"), count + 1, delay,
+        )
+        self.restart_backoff[key] = count + 1
+        try:
+            await self.client.request("PUT", f"/model-instances/{key}", body=current | {
+                "restart_count": (current.get("restart_count") or 0) + 1,
+                "last_restart_time": now.isoformat(),
+                "state": "scheduled",
+                "state_message": "",
+            })
+            self.restarts_requested += 1
+        except APIError as error:
+            if error.status != 404:
+                raise
+        self.error_instances.pop(key, None)
 
     def summary(self):
         return {
@@ -367,6 +493,8 @@ class VirtualWorker:
             "instances": len(self.instances),
             "running": len(self.runtime.running_ids),
             "report_errors": self.report_errors,
+            "restarts_requested": self.restarts_requested,
+            "orphan_cleanups": self.orphan_cleanups,
             "stale_reports": self.stale_reports,
             "deleted_assignments": self.deleted_assignments,
             "last_error": self.last_error,

@@ -1,22 +1,60 @@
-"""Synthetic traffic, exported with the unmodified 2.3.1 runtime metric contract."""
+"""Synthetic engine expositions using each runtime's native metric names.
+
+Engines (vLLM, SGLang, MindIE, their PD routers and the SGLang gateway) expose
+their own families, exactly as the native Worker scrapes them. The Worker-side
+aggregator in ``runtime_metrics`` normalizes them with GPUStack's metrics config.
+"""
 
 import json
 import math
 import time
+from dataclasses import dataclass, field
 
-# Native vLLM names mapped by GPUStack's built-in metrics_config.yaml.
-RAW_NAMES = {
-    "kv_cache_usage_ratio": "kv_cache_usage_perc",
-    "time_per_output_token_seconds": "request_time_per_output_token_seconds",
-    "request_preemptions": "num_preemptions",
-}
 TIME_BUCKETS = (0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60)
 TOKEN_BUCKETS = (1, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 32768)
+MS_BUCKETS = tuple(b * 1000 for b in TIME_BUCKETS)
+BYTE_BUCKETS = (1024, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864)
+MB_BUCKETS = tuple(b / 1048576 for b in BYTE_BUCKETS)
+COUNT_BUCKETS = (1, 2, 4, 8, 16, 32, 64, 128)
+
+# Engine version reported by the synthetic version API when a deployment does not pin one.
+DEFAULT_RUNTIME_VERSIONS = {"vLLM": "0.21.0", "SGLang": "0.5.15.post1", "MindIE": "2.3.0"}
+
+
+@dataclass
+class Family:
+    name: str
+    type: str
+    documentation: str = ""
+    samples: list = field(default_factory=list)  # (sample name, labels, value)
 
 
 def sample_line(name, labels, value):
     encoded = ",".join(f"{k}={json.dumps(str(v), ensure_ascii=False)}" for k, v in labels.items())
-    return f"{name}{{{encoded}}} {value:.9g}"
+    if isinstance(value, float) and value.is_integer() and abs(value) < 1e15:
+        value = int(value)
+    text = repr(value) if isinstance(value, float) else str(value)
+    return f"{name}{{{encoded}}} {text}" if labels else f"{name} {text}"
+
+
+def render_families(families) -> str:
+    lines = []
+    for family in families:
+        if not family.samples:
+            continue
+        # Same header conventions as prometheus_client.generate_latest (text format 0.0.4).
+        name, kind = family.name, family.type
+        if kind == "counter":
+            name += "_total"
+        elif kind == "info":
+            name, kind = name + "_info", "gauge"
+        elif kind == "unknown":
+            kind = "untyped"
+        doc = (family.documentation or family.name).replace("\\", "\\\\").replace("\n", "\\n")
+        lines.append(f"# HELP {name} {doc}")
+        lines.append(f"# TYPE {name} {kind}")
+        lines.extend(sample_line(*sample) for sample in family.samples)
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 class SyntheticTraffic:
@@ -65,198 +103,229 @@ class SyntheticTraffic:
         }
         return requests, gauges, counters, histograms
 
-    def render(self, labels, *, raw=False, now=None, router=False, pd=False, peers=()):
-        requests, gauges, counters, histograms = self.values(now)
-        if router:
-            # A routing component is not another token-producing engine.
-            gauges, counters, histograms = {}, {}, {}
-        if pd:
-            gauges.update(
-                pd_prefill_bootstrap_queue_requests=1 if self.rate else 0,
-                pd_prefill_inflight_queue_requests=gauges["num_requests_running"],
-                pd_decode_prealloc_queue_requests=0,
-                pd_decode_transfer_queue_requests=1,
-                pd_decode_pending_prealloc_token_usage=0,
-            )
-            counters.update(
-                pd_kv_transfer_failed=0,
-                pd_bootstrap_failed=0,
-                pd_prefill_retries=0,
-                pd_kv_lease_expired=0,
-                pd_kv_notification_failed=0,
-            )
-            histograms.update(
-                pd_kv_transfer_seconds=0.02,
-                pd_kv_transfer_latency_seconds=0.02,
-                pd_kv_transfer_alloc_seconds=0.002,
-                pd_kv_transfer_post_seconds=0.003,
-                pd_kv_transfer_bytes=524288,
-                pd_kv_transfer_descriptors=8,
-            )
-        if router:
-            gauges.update(pd_router_worker_health=1, pd_router_worker_requests_active=2)
-            counters.update(
-                pd_router_requests=requests,
-                pd_router_prefill_requests=requests,
-                pd_router_decode_requests=requests,
-                pd_router_prefill_errors=0,
-                pd_router_decode_errors=0,
-                pd_router_worker_selections=requests * 2,
-            )
-            histograms.update(pd_router_request_duration_seconds=2)
-        lines = ["# Synthetic background traffic; no real inference or client requests implied."]
-
-        def name(key):
-            return ("vllm:" + RAW_NAMES.get(key, key)) if raw else "gpustack:" + key
-
-        if router and peers:
-            gauges.pop("pd_router_worker_health", None)
-            gauges.pop("pd_router_worker_requests_active", None)
-            counters.pop("pd_router_worker_selections", None)
-            for peer in peers:
-                peer_labels = labels | peer
-                for key, value in (
-                    ("pd_router_worker_health", 1),
-                    ("pd_router_worker_requests_active", 1 if self.rate else 0),
-                ):
-                    lines.append(f"# TYPE {name(key)} gauge")
-                    lines.append(sample_line(name(key), peer_labels, value))
-                key = "pd_router_worker_selections"
-                lines.append(f"# TYPE {name(key)} counter")
-                lines.append(sample_line(name(key) + "_total", peer_labels, requests // len(peers)))
-
-        for kind, values in (("gauge", gauges), ("counter", counters)):
-            for key, value in values.items():
-                metric = name(key)
-                lines.append(f"# TYPE {metric} {kind}")
-                lines.append(
-                    sample_line(metric + ("_total" if kind == "counter" else ""), labels, value)
-                )
-        for key, average in histograms.items():
-            metric = name(key)
-            lines.append(f"# TYPE {metric} histogram")
-            tokens = key in ("request_prompt_tokens", "request_generation_tokens")
-            values = [
-                average if tokens else average * self.factor * x
-                for x in (0.5, 0.7, 0.85, 0.95, 1.05, 1.15, 1.3, 1.5)
-            ]
-            cycles, remainder = divmod(requests, len(values))
-            counts = [cycles + (index < remainder) for index in range(len(values))]
-            for bucket in TOKEN_BUCKETS if tokens else TIME_BUCKETS:
-                count = sum(n for value, n in zip(values, counts, strict=True) if value <= bucket)
-                lines.append(sample_line(metric + "_bucket", labels | {"le": str(bucket)}, count))
-            lines.append(sample_line(metric + "_bucket", labels | {"le": "+Inf"}, requests))
-            lines.append(sample_line(metric + "_count", labels, requests))
-            total = sum(value * count for value, count in zip(values, counts, strict=True))
-            lines.append(sample_line(metric + "_sum", labels, total))
-        return "\n".join(lines) + "\n"
+    def histogram(self, family, labels, average, requests, buckets, *, exact=False):
+        values = [
+            average if exact else average * self.factor * x
+            for x in (0.5, 0.7, 0.85, 0.95, 1.05, 1.15, 1.3, 1.5)
+        ]
+        cycles, remainder = divmod(requests, len(values))
+        counts = [cycles + (index < remainder) for index in range(len(values))]
+        for bucket in buckets:
+            count = sum(n for value, n in zip(values, counts, strict=True) if value <= bucket)
+            bucket_labels = labels | {"le": repr(float(bucket))}
+            family.samples.append((family.name + "_bucket", bucket_labels, count))
+        family.samples.append((family.name + "_bucket", labels | {"le": "+Inf"}, requests))
+        family.samples.append((family.name + "_count", labels, requests))
+        total = sum(value * count for value, count in zip(values, counts, strict=True))
+        family.samples.append((family.name + "_sum", labels, float(total)))
 
 
-def instance_labels(worker, record, source=None):
-    instance = record.instance
-    labels = {
-        "worker_id": str(worker.worker_id),
-        "worker_name": worker.spec.name,
-        "model_id": str(instance["model_id"]),
-        "model_name": instance.get("model_name", ""),
-        "model_instance_id": str(instance["id"]),
-        "model_instance_name": instance["name"],
-        "runtime": record.model.get("backend") or instance.get("backend") or "vLLM",
-        "role": instance.get("role") or "",
-        "restart_count": str(record.generation),
-        "source_kind": "legacy",
-        "source_name": "legacy",
-        "workload_name": "",
-        "exposition_scope": "legacy",
-        "workersim": "true",
-    }
-    if source:
-        labels.update(source)
-    return labels
+# Native exposition names per runtime. Keys are the simulator's internal quantities.
+_ENGINE = {
+    "vLLM": {
+        "gauge": {
+            "num_requests_running": "vllm:num_requests_running",
+            "num_requests_waiting": "vllm:num_requests_waiting",
+            "kv_cache_usage_ratio": "vllm:kv_cache_usage_perc",
+        },
+        "counter": {
+            "request_success": "vllm:request_success",
+            "prompt_tokens": "vllm:prompt_tokens",
+            "generation_tokens": "vllm:generation_tokens",
+            "prefix_cache_queries": "vllm:prefix_cache_queries",
+            "prefix_cache_hits": "vllm:prefix_cache_hits",
+            "prompt_tokens_cached": "vllm:prompt_tokens_cached",
+            "request_preemptions": "vllm:num_preemptions",
+        },
+        "histogram": {
+            "time_to_first_token_seconds": "vllm:time_to_first_token_seconds",
+            "time_per_output_token_seconds": "vllm:request_time_per_output_token_seconds",
+            "inter_token_latency_seconds": "vllm:inter_token_latency_seconds",
+            "e2e_request_latency_seconds": "vllm:e2e_request_latency_seconds",
+            "request_queue_time_seconds": "vllm:request_queue_time_seconds",
+            "request_inference_time_seconds": "vllm:request_inference_time_seconds",
+            "request_prefill_time_seconds": "vllm:request_prefill_time_seconds",
+            "request_decode_time_seconds": "vllm:request_decode_time_seconds",
+            "request_prompt_tokens": "vllm:request_prompt_tokens",
+            "request_generation_tokens": "vllm:request_generation_tokens",
+        },
+    },
+    "SGLang": {
+        "gauge": {
+            "num_requests_running": "sglang:num_running_reqs",
+            "num_requests_waiting": "sglang:num_queue_reqs",
+            "kv_cache_usage_ratio": "sglang:token_usage",
+            "prefix_cache_hit_rate": "sglang:cache_hit_rate",
+            "request_preemptions": "sglang:num_retracted_reqs",
+        },
+        "counter": {
+            "prompt_tokens": "sglang:prompt_tokens",
+            "generation_tokens": "sglang:generation_tokens",
+            "prompt_tokens_cached": "sglang:cached_tokens",
+        },
+        "histogram": {
+            "time_to_first_token_seconds": "sglang:time_to_first_token_seconds",
+            "inter_token_latency_seconds": "sglang:inter_token_latency_seconds",
+            "e2e_request_latency_seconds": "sglang:e2e_request_latency_seconds",
+            "request_queue_time_seconds": "sglang:queue_time_seconds",
+            "request_prompt_tokens": "sglang:prompt_tokens_histogram",
+            "request_generation_tokens": "sglang:generation_tokens_histogram",
+        },
+    },
+    "MindIE": {
+        "gauge": {
+            "num_requests_running": "num_requests_running",
+            "num_requests_waiting": "num_requests_waiting",
+            "num_requests_swapped": "num_requests_swapped",
+            "prefix_cache_hit_rate": "npu_prefix_cache_hit_rate",
+            "kv_cache_usage_ratio": "npu_cache_usage_perc",
+        },
+        "counter": {
+            "request_success": "request_success",
+            "prompt_tokens": "prompt_tokens",
+            "generation_tokens": "generation_tokens",
+            "request_preemptions": "num_preemptions",
+        },
+        "histogram": {
+            "time_to_first_token_seconds": "time_to_first_token_seconds",
+            "time_per_output_token_seconds": "time_per_output_token_seconds",
+            "e2e_request_latency_seconds": "e2e_request_latency_seconds",
+            "request_prompt_tokens": "request_prompt_tokens",
+            "request_generation_tokens": "request_generation_tokens",
+        },
+    },
+}
+TOKEN_HISTOGRAMS = ("request_prompt_tokens", "request_generation_tokens")
 
 
-def metric_sources(worker, record):
-    """One series per real native metrics source; headless members have no token series."""
-    if not record.workloads:
-        return (
-            [{}] if record.instance.get("worker_id", worker.worker_id) == worker.worker_id else []
+class _Builder:
+    def __init__(self):
+        self.families: dict[str, Family] = {}
+
+    def family(self, name, kind, doc=""):
+        if name not in self.families:
+            self.families[name] = Family(name, kind, doc or name)
+        return self.families[name]
+
+    def gauge(self, name, labels, value):
+        self.family(name, "gauge").samples.append((name, labels, value))
+
+    def counter(self, name, labels, value):
+        self.family(name, "counter").samples.append((name + "_total", labels, value))
+
+
+def engine_families(traffic, runtime, labels, *, role=None, now=None) -> list[Family]:
+    """One engine API's native exposition; empty for runtimes without metrics support."""
+    names = _ENGINE.get(runtime)
+    if traffic is None or names is None:
+        return []
+    requests, gauges, counters, histograms = traffic.values(now)
+    out = _Builder()
+    for key, name in names["gauge"].items():
+        value = counters.get(key, 0) if key == "request_preemptions" else gauges.get(key, 0)
+        out.gauge(name, labels, value)
+    for key, name in names["counter"].items():
+        sample_labels = labels
+        if name == "sglang:cached_tokens":
+            sample_labels = labels | {"cache_source": "device"}
+        out.counter(name, sample_labels, counters[key])
+    for key, name in names["histogram"].items():
+        tokens = key in TOKEN_HISTOGRAMS
+        traffic.histogram(
+            out.family(name, "histogram"), labels, histograms[key], requests,
+            TOKEN_BUCKETS if tokens else TIME_BUCKETS, exact=tokens,
         )
-    result = []
-    for workload in record.workloads:
-        if workload.get("state") in ("stopped", "failed"):
-            continue
-        common = {"workload_name": workload["name"], "exposition_scope": "engine"}
-        component = workload.get("component")
-        if component:
-            if not component.get("api_port") or component.get("stop_requested"):
-                continue
-            source = common | {"source_kind": component["kind"], "source_name": workload["name"]}
-            if component["kind"] == "sglang_smg":
-                source["component_attempt"] = str(component.get("attempt", 0))
-            result.append(source)
-        else:
-            for placement in workload.get("dp_rank_placements", []):
-                if placement["node_rank"] != 0:
-                    continue
-                rank = placement["dp_rank"]
-                result.append(
-                    common
-                    | {
-                        "source_kind": "vllm_engine",
-                        "source_name": f"{workload['name']}/main-{rank}",
-                        "endpoint_dp_rank": str(rank),
-                        "gpu_indexes": ",".join(map(str, placement["gpu_indexes"])),
-                    }
-                )
-    return result
+    if role in ("prefill", "decode"):
+        _pd_engine(out, traffic, runtime, labels, requests, gauges)
+    return list(out.families.values())
 
 
-def render_models(worker, *, raw=False):
-    lines = []
-    for record in worker.runtime.records.values():
-        if record.phase != "running" or record.traffic is None:
-            continue
-        for source in metric_sources(worker, record):
-            labels = instance_labels(worker, record, source)
-            if raw:
-                labels["engine"] = labels.get("endpoint_dp_rank", "0")
-            router = (
-                record.instance.get("role") == "router" or labels["source_kind"] == "sglang_smg"
-            )
-            peers = []
-            if record.instance.get("role") == "router" and record.worker is not None:
-                from workersim.router import registered_peers
+def _pd_engine(out, traffic, runtime, labels, requests, gauges):
+    if runtime == "vLLM":
+        # NIXL connector families, already in base units.
+        for name, average, buckets in (
+            ("vllm:nixl_bytes_transferred", 524288, BYTE_BUCKETS),
+            ("vllm:nixl_xfer_time_seconds", 0.02, TIME_BUCKETS),
+            ("vllm:nixl_post_time_seconds", 0.003, TIME_BUCKETS),
+            ("vllm:nixl_num_descriptors", 8, COUNT_BUCKETS),
+        ):
+            traffic.histogram(out.family(name, "histogram"), labels, average, requests, buckets)
+        for name in (
+            "vllm:nixl_num_failed_transfers",
+            "vllm:nixl_num_kv_expired_reqs",
+            "vllm:nixl_num_failed_notifications",
+        ):
+            out.counter(name, labels, 0)
+    elif runtime == "SGLang":
+        for name, value in (
+            ("sglang:num_prefill_bootstrap_queue_reqs", 1 if traffic.rate else 0),
+            ("sglang:num_prefill_inflight_queue_reqs", gauges["num_requests_running"]),
+            ("sglang:num_decode_prealloc_queue_reqs", 0),
+            ("sglang:num_decode_transfer_queue_reqs", 1),
+            ("sglang:pending_prealloc_token_usage", 0),
+        ):
+            out.gauge(name, labels, value)
+        for name in (
+            "sglang:num_transfer_failed_reqs",
+            "sglang:num_bootstrap_failed_reqs",
+            "sglang:num_prefill_retries",
+        ):
+            out.counter(name, labels, 0)
+        # SGLang reports PD transfer time in milliseconds and volume in megabytes.
+        for name, average, buckets in (
+            ("sglang:kv_transfer_bootstrap_ms", 20, MS_BUCKETS),
+            ("sglang:kv_transfer_latency_ms", 20, MS_BUCKETS),
+            ("sglang:kv_transfer_alloc_ms", 2, MS_BUCKETS),
+            ("sglang:kv_transfer_total_mb", 0.5, MB_BUCKETS),
+        ):
+            traffic.histogram(out.family(name, "histogram"), labels, average, requests, buckets)
 
-                peers = [
-                    {"worker_type": row["worker_type"], "worker": url.removeprefix("http://")}
-                    for url, row in registered_peers(record).items()
-                ]
-            lines.append(
-                record.traffic.render(
-                    labels,
-                    raw=raw,
-                    router=router,
-                    pd=record.instance.get("role") in ("prefill", "decode"),
-                    peers=peers,
-                )
-            )
-            if raw:
-                continue
-            # "success" describes successful generation of synthetic exposition, not inference.
-            lines.append(
-                sample_line(
-                    "gpustack:runtime_metrics_scrape_status", labels | {"status": "success"}, 1
-                )
-                + "\n"
-            )
-            lines.append(sample_line("workersim_model_simulated", labels, 1) + "\n")
-    # Multiple instances on one exporter share families; TYPE must occur only once.
-    seen = set()
-    result = []
-    for line in "".join(lines).splitlines():
-        if line.startswith("# TYPE "):
-            if line in seen:
-                continue
-            seen.add(line)
-        result.append(line)
-    return "\n".join(result) + ("\n" if result else "")
+
+def router_families(traffic, runtime, labels, peers=(), *, now=None) -> list[Family]:
+    """PD router exposition: the vLLM router fork or the SGLang model gateway."""
+    if traffic is None or runtime not in ("vLLM", "SGLang"):
+        return []
+    requests = traffic.values(now)[0]
+    out = _Builder()
+    if runtime == "vLLM":
+        out.counter("vllm_router_pd_requests", labels, requests)
+        for peer in peers:
+            peer_labels = labels | {"worker": "http://" + peer["worker"]}
+            kind = peer["worker_type"]
+            out.counter(f"vllm_router_pd_{kind}_requests", peer_labels, requests // len(peers))
+            if kind == "decode":
+                out.counter("vllm_router_pd_decode_errors", peer_labels, 0)
+        traffic.histogram(
+            out.family("vllm_router_pd_request_duration_seconds", "histogram"),
+            labels, 2, requests, TIME_BUCKETS,
+        )
+        return list(out.families.values())
+    _smg(out, traffic, labels, peers, requests)
+    traffic.histogram(
+        out.family("smg_router_request_duration_seconds", "histogram"),
+        labels, 2, requests, TIME_BUCKETS,
+    )
+    for peer in peers:
+        out.gauge("smg_worker_health", labels | _peer(peer), 1)
+    return list(out.families.values())
+
+
+def gateway_families(traffic, labels, peers=(), *, now=None) -> list[Family]:
+    """The ordinary SGLang gateway component (SGLangSMG mapping domain)."""
+    if traffic is None:
+        return []
+    out = _Builder()
+    _smg(out, traffic, labels, peers, traffic.values(now)[0])
+    return list(out.families.values())
+
+
+def _peer(peer):
+    return {"worker": "http://" + peer["worker"], "worker_type": peer["worker_type"]}
+
+
+def _smg(out, traffic, labels, peers, requests):
+    out.counter("smg_router_requests", labels, requests)
+    for peer in peers:
+        peer_labels = labels | _peer(peer)
+        out.counter("smg_worker_selection", peer_labels, requests // max(1, len(peers)))
+        out.gauge("smg_worker_requests_active", peer_labels, 1 if traffic.rate else 0)

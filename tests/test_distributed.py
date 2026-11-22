@@ -3,11 +3,10 @@ import copy
 
 import aiohttp
 import pytest
-from conftest import eventually
+from conftest import eventually, model_metrics
 
 from workersim.config import WorkerGroup
 from workersim.fleet import Fleet
-from workersim.model_metrics import render_models
 
 
 @pytest.mark.asyncio
@@ -26,11 +25,14 @@ async def test_native_local_members_and_rank_sources(config, control_plane, monk
     config.validate()
     monkeypatch.setenv("GPUSTACK_REGISTRATION_TOKEN", "registration-secret")
     managed = mode in ("external", "hybrid", "sglang")
-    model = {"backend": "vLLM", "backend_parameters": []}
+    model = {"id": 1, "name": "smoke", "backend": "vLLM", "backend_parameters": []}
     if mode in ("external", "hybrid"):
         model["backend_parameters"] = [f"--data-parallel-{mode}-lb", "--dp=2", "--tp=2"]
     if mode == "sglang":
-        model = {"backend": "SGLang", "backend_parameters": ["--dp=2", "--tp=2"]}
+        model = {
+            "id": 1, "name": "smoke", "backend": "SGLang",
+            "backend_parameters": ["--dp=2", "--tp=2"],
+        }
     control_plane.models[1] = model
     instance = await control_plane.assign(managed=managed)
     instance["gpu_indexes"] = [0, 1]
@@ -65,7 +67,7 @@ async def test_native_local_members_and_rank_sources(config, control_plane, monk
                     ) as response:
                         inventories.append(await response.json())
                 assert len({i["port_range"] for i in inventories}) == 1
-        follower_metrics = render_models(fleet.workers[1])
+        follower_metrics = await model_metrics(fleet.workers[1])
         if mode == "external":
             assert 'endpoint_dp_rank="1"' in follower_metrics
             assert 'source_kind="vllm_engine"' in follower_metrics
@@ -135,7 +137,7 @@ async def test_injected_failure_retires_endpoint_and_metric_series(
         await eventually(lambda: control_plane.instances[10]["state"] == "error")
         await eventually(lambda: not fleet.ports)
         assert "injected runtime failure" in control_plane.instances[10]["state_message"]
-        assert render_models(worker) == ""
+        assert await model_metrics(worker) == ""
     finally:
         fleet.stop.set()
         await task
@@ -167,7 +169,7 @@ async def test_pd_roles_and_file_progress_reconnect_and_delete(config, control_p
         await eventually(lambda: control_plane.files[7]["state"] == "ready")
         assert control_plane.files[7]["download_progress"] == 100
         assert control_plane.files[7]["resolved_paths"]
-        text = render_models(worker)
+        text = await model_metrics(worker)
         assert 'role="prefill"' in text and "gpustack:pd_kv_transfer_seconds_bucket" in text
         assert 'role="router"' in text and "gpustack:pd_router_requests_total" in text
         connections = worker.watch_connections["model-files"]

@@ -7,9 +7,9 @@ from pathlib import PurePosixPath
 
 from aiohttp import web
 
-from workersim import __version__
-from workersim.metrics import render
-from workersim.model_metrics import render_models
+from workersim import NATIVE_VERSION, TARGET_COMMIT
+from workersim.metrics import render, render_raw
+from workersim.model_metrics import render_families
 from workersim.router import membership, registered_peers
 from workersim.synthetic_api import response as synthetic_response
 
@@ -43,7 +43,7 @@ async def listen(app: web.Application, host: str, port: int) -> web.AppRunner:
 def worker_app(worker) -> web.Application:
     @web.middleware
     async def authenticate(request, handler):
-        if request.path == "/healthz":
+        if request.path in ("/healthz", "/readyz", "/version"):
             if not worker.online:
                 raise web.HTTPServiceUnavailable()
             return await handler(request)
@@ -67,7 +67,11 @@ def worker_app(worker) -> web.Application:
     app = web.Application(middlewares=[authenticate])
 
     async def health(request):
-        return web.json_response({"status": "ok", "simulated": True, "version": __version__})
+        # Native probes answer the JSON string "ok".
+        return web.json_response("ok")
+
+    async def version(request):
+        return web.json_response({"version": NATIVE_VERSION, "git_commit": TARGET_COMMIT})
 
     async def files(request):
         path = request.query.get("path", "")
@@ -144,6 +148,8 @@ def worker_app(worker) -> web.Application:
         return await engine_response(request, record.instance, record.traffic, record=record)
 
     app.router.add_get("/healthz", health)
+    app.router.add_get("/readyz", health)
+    app.router.add_get("/version", version)
     app.router.add_get("/port-reservations", worker.port_reservations.handle)
     app.router.add_route(
         "*", "/port-reservations/{instance_id:\\d+}", worker.port_reservations.handle
@@ -164,9 +170,7 @@ def metrics_app(worker) -> web.Application:
         if not worker.online:
             raise web.HTTPServiceUnavailable()
         return web.Response(
-            text=render_models(worker, raw=True)
-            if request.path.endswith("/raw")
-            else render(worker),
+            text=render_raw(worker) if request.path.endswith("/raw") else render(worker),
             content_type="text/plain",
             headers={"X-WorkerSim": "true"},
         )
@@ -190,12 +194,22 @@ async def engine_response(request, instance, traffic=None, *, record=None):
                 "data": [{"id": model_name, "object": "model", "owned_by": "workersim"}],
             }
         )
+    if path == "/version":
+        from workersim.runtime_metrics import engine_version
+
+        return web.json_response(
+            {"version": engine_version(instance, getattr(record, "model", None))}
+        )
     if path == "/metrics":
-        text = "workersim_engine_simulated 1\n"
-        if traffic is not None:
-            text += traffic.render(
-                {"model_name": model_name, "engine": "0", "workersim": "true"}, raw=True
-            )
+        # The runtime's own native exposition, which the Worker aggregator normalizes.
+        text = ""
+        if record is not None and traffic is not None:
+            from workersim.runtime_metrics import engine_source, source_families
+
+            port = (request.transport.get_extra_info("sockname") or (None, None))[1]
+            source = engine_source(record, port)
+            if source is not None:
+                text = render_families(source_families(record, source))
         return web.Response(text=text, content_type="text/plain", headers={"X-WorkerSim": "true"})
     if path == "/v1/chat/completions" and request.method == "POST":
         if record is not None and instance.get("role") == "router":

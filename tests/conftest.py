@@ -59,7 +59,8 @@ class ControlPlane:
         self.workers = {}
         self.instances = {}
         self.files = {}
-        self.models = {}
+        # Native aggregation skips instances whose model is unknown.
+        self.models = {1: {"id": 1, "name": "smoke", "backend": "vLLM", "restart_on_error": True}}
         self.inference_backends = {}
         self.watchers = {}
         self.statuses = {}
@@ -67,6 +68,7 @@ class ControlPlane:
         self.requests = []
         self.request_times = []
         self.version_requests = 0
+        self.server_version = "v2.3.1"
         self.managed_reports = []
         self.reject_report = None
         self.watch_heartbeat_interval = 0.1
@@ -81,7 +83,7 @@ class ControlPlane:
         path = request.path
         if path == "/version":
             self.version_requests += 1
-            return web.json_response({"version": "2.3.1", "git_commit": "458030e8"})
+            return web.json_response({"version": self.server_version, "git_commit": "458030e8"})
         token = request.headers.get("Authorization", "").removeprefix("Bearer ")
         self.api_inflight += 1
         self.max_api_inflight = max(self.max_api_inflight, self.api_inflight)
@@ -292,3 +294,15 @@ async def eventually(predicate, timeout=5):  # noqa: ASYNC109
     async with asyncio.timeout(timeout):
         while not predicate():  # noqa: ASYNC110 - poll externally observable test conditions
             await asyncio.sleep(0.02)
+
+
+async def model_metrics(worker):
+    """Run one native aggregation pass and return the unified runtime exposition."""
+    from workersim.model_metrics import render_families
+
+    await worker.runtime_metrics.aggregate()
+    families = [
+        f for f in worker.runtime_metrics.unified.fresh()
+        if f.name != "gpustack:runtime_metrics_scrape_status"
+    ]
+    return render_families(families)
