@@ -95,6 +95,10 @@ jobs:
               --mount type=bind,source="$PWD/configs/custom-gpu.yaml",target=/config/fleet.yaml,readonly \
               "$IMAGE@$DIGEST" --config /config/fleet.yaml validate
           fi
+          # GPUStack Add Worker style arguments resolve without contacting a Server.
+          docker run --rm -e GPUSTACK_TOKEN=check "$IMAGE@$DIGEST" \
+            --server-url http://127.0.0.1 --worker-ip 127.0.0.1 \
+            --workers 3 --profile b300-288gb --dry-run
       - name: Publish compatibility release
         if: github.event_name == 'push'
         env:

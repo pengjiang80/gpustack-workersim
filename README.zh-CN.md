@@ -24,37 +24,100 @@ WorkerSim 使用独立产品版本。各版本支持的 GPUStack 版本见 [Rele
 
 ## Docker 快速启动
 
-推荐使用 Linux host networking。先准备当前 WorkerSim Release 支持的 GPUStack Server，在 UI 创建测试集群，从添加 Worker 的说明中获取注册 Token。
+WorkerSim 可直接使用 GPUStack 在 **集群 → 添加 Worker** 中给出的命令启动。需要当前
+WorkerSim Release 支持的 GPUStack Server，以及 Linux **amd64** 主机。
+
+### 1. 复制 GPUStack 的添加 Worker 命令
 
 ```bash
-git clone https://github.com/pengjiang80/gpustack-workersim.git
-cd gpustack-workersim
+sudo docker run -d --name gpustack-worker \
+  -e "GPUSTACK_RUNTIME_DEPLOY_MIRRORED_NAME=gpustack-worker" \
+  -e "GPUSTACK_TOKEN=<集群Token>" \
+  --restart=unless-stopped --privileged --network=host \
+  --volume /var/run/docker.sock:/var/run/docker.sock \
+  --volume gpustack-data:/var/lib/gpustack \
+  --runtime nvidia \
+  gpustack/gpustack:v2.3.1 \
+  --server-url http://<server> --worker-ip <主机IP>
 ```
 
-编辑 [`configs/docker.yaml`](configs/docker.yaml)：
+### 2. 修改三处
 
-- `server.url`：模拟器可访问的 Server 根地址，不包含 `/v2`。
-- `server.cluster_id`：可显式设置目标集群 ID。
-- `network.advertise_address` 和 `network.worker_ip`：Server、Prometheus 均可访问的节点地址。
-
-默认示例为两个 H100 节点。`172.17.0.1` 是 Docker 网桥示例，部署时应使用实际地址。Server 容器里的 `127.0.0.1` 指向容器自身。
+1. 镜像换成 **`gpustack/workersim:0.1.3`**。
+2. 删除 **`--runtime nvidia`**（或 `ascend` 等）及 `--device /dev/infiniband`：CPU 主机没有
+   这些运行时和设备，Docker 会拒绝启动。
+3. 在末尾追加节点数量和硬件预设。
 
 ```bash
-sudo python3 scripts/configure_port_reservations.py --workers 2 --apply
-export GPUSTACK_REGISTRATION_TOKEN='<集群注册Token>'
-docker pull gpustack/workersim:0.1.2
-docker compose up -d --no-build
-docker compose logs -f workersim
-docker compose exec workersim workersim --config /config/fleet.yaml status
+sudo docker run -d --name workersim \
+  -e "GPUSTACK_TOKEN=<集群Token>" \
+  --restart=unless-stopped --privileged --network=host \
+  --volume gpustack-data:/var/lib/gpustack \
+  gpustack/workersim:0.1.3 \
+  --server-url http://<server> --worker-ip <主机IP> \
+  --workers 20 --profile h100-80gb
 ```
 
-端口预留的 `--workers` 应与配置数量一致。脚本保留已有设置，不清理已经存在的连接或 TIME_WAIT。Compose 已设置自动重启、持久化 volume 和 `nofile=65536`。**linux/amd64** 镜像以 UID 10001 运行，不需要特权模式或 Docker socket。
+在 UI 中可以看到 20 个名为 `<主机名>-sim-001`… 的 Worker 变为 **Ready**，每个有 8 张
+H100。之后照常部署模型，由真实 Server 调度。
 
-Docker 镜像仓库现为 [`gpustack/workersim`](https://hub.docker.com/r/gpustack/workersim)，
-旧 Docker Hub 仓库已删除。已有部署只需更新镜像地址，保留配置挂载、身份 volume、
-容器名和显式端口设置。GitHub 仓库与 Python 包仍名为 `gpustack-workersim`。
+原命令的其他参数可以保留。Docker socket 和 `GPUSTACK_RUNTIME_DEPLOY_MIRRORED_NAME`
+会被忽略，可删除。`--privileged` 让 WorkerSim 每次启动时在主机上预留监听端口，避免被
+自动分配的源端口占用（大规模节点需要），随后降为 UID 10001 运行；不加该参数也能启动，
+只会在日志中提示未预留端口。身份保存在 `gpustack-data` 的 `workersim/` 目录下，不会修改
+真实 Worker 的文件。
 
-在 GPUStack UI 查看节点 Ready 状态，然后照常向测试集群部署模型。
+```bash
+docker logs -f workersim
+curl -s http://127.0.0.1:20099/status   # 在主机上查看 Fleet 状态
+```
+
+### 节点数量与硬件
+
+| 参数 | 默认值 | 含义 |
+|---|---|---|
+| `--workers N` | `1` | 本容器模拟的 Worker 数（1–1000）。 |
+| `--profile 名称` | `h100-80gb` | 硬件预设：设备及典型主机配置，`--list-profiles` 可列出全部。 |
+| `--gpus-per-worker N` | 预设 | 每个 Worker 的卡数。 |
+| `--gpu-name 文本`、`--gpu-memory-gib N` | 预设 | 上报的设备名称和单卡显存。 |
+| `--cpu-cores N`、`--memory-gib N`、`--disk-gib N` | 预设 | 每个 Worker 的 CPU 线程、内存和磁盘。 |
+| `--label KEY=VALUE` | — | Worker 标签，可重复。 |
+| `--nvlink-domain-workers N` | — | 每个多节点 NVLink 域的 Worker 数（NVIDIA）。 |
+| `--model-rps N` | `2` | 每个运行中模型的合成后台请求速率，`0` 表示空闲。 |
+| `--worker-name 前缀` | `<主机名>-sim` | Worker 名称前缀（`前缀-001` …）。 |
+| `--group KEY=VALUE,...` | — | 为混合集群添加分组，可重复。键：`workers`、`profile`、`gpus`、`prefix`、`gpu-name`、`gpu-memory-gib`、`cpu-cores`、`memory-gib`、`disk-gib`、`nvlink-domain-workers`。 |
+| `--dry-run` | — | 打印解析后的节点、地址和端口后退出。 |
+
+每个参数也可用环境变量设置，例如 `-e WORKERSIM_WORKERS=20 -e WORKERSIM_PROFILE=b300-288gb`；
+分组使用 `WORKERSIM_GROUPS="workers=10,profile=b300-288gb;workers=3,profile=ascend-910b4-64gb"`。
+
+| 预设 | 设备 | 单卡显存 | 卡数 | CPU | 内存 | 磁盘 |
+|---|---|---:|---:|---:|---:|---:|
+| `b300-288gb` | NVIDIA B300 | 288 GiB | 8 | 224 | 2048 GiB | 8192 GiB |
+| `h100-80gb` | NVIDIA H100 80GB HBM3 | 80 GiB | 8 | 224 | 2048 GiB | 8192 GiB |
+| `a800-80gb` | NVIDIA A800-SXM4-80GB | 80 GiB | 8 | 128 | 1024 GiB | 4096 GiB |
+| `rtx4090-24gb` | NVIDIA GeForce RTX 4090 | 24 GiB | 8 | 64 | 512 GiB | 2048 GiB |
+| `ascend-910b4-64gb` | Ascend 910B4 | 64 GiB | 8 | 192 | 1536 GiB | 4096 GiB |
+
+混合示例：10 个 4 卡 B300 Worker 加 3 个 Ascend Worker。
+
+```bash
+gpustack/workersim:0.1.3 --server-url http://<server> --worker-ip <主机IP> \
+  --group workers=10,profile=b300-288gb,gpus=4 \
+  --group workers=3,profile=ascend-910b4-64gb
+```
+
+原生参数 `--worker-port`、`--worker-metrics-port` 设置第一个 Worker 的 API 和 metrics 端口，
+其他未识别的原生参数记录日志后忽略。同一主机运行第二个容器时，应使用不同的
+`--worker-port` / `--worker-metrics-port` 和独立 volume。
+
+### Compose 与 YAML
+
+需要用文件描述节点时，Compose 方式保持不变：编辑 [`configs/docker.yaml`](configs/docker.yaml)，
+设置 `GPUSTACK_REGISTRATION_TOKEN` 后执行 `docker compose up -d --no-build`。参数也可与挂载的
+`--config` 文件组合，参数优先。
+
+Docker 镜像仓库为 [`gpustack/workersim`](https://hub.docker.com/r/gpustack/workersim)。
 
 ## 节点与设备配置
 

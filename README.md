@@ -42,52 +42,104 @@ Server and WorkerSim can share a CPU host or run on different hosts. Server and 
 
 ## Quick start
 
-### 1. Configure a test cluster
+WorkerSim starts from the same command GPUStack shows under **Clusters → Add Worker**.
+Use a GPUStack Server supported by your WorkerSim release and a Linux **amd64** host.
 
-Use a GPUStack Server supported by your WorkerSim release. Create a test cluster in the UI and obtain its worker registration token from the **Add Worker** instructions.
-
-```bash
-git clone https://github.com/pengjiang80/gpustack-workersim.git
-cd gpustack-workersim
-```
-
-Edit [`configs/docker.yaml`](configs/docker.yaml):
-
-- `server.url`: Server root URL as reached from WorkerSim; do not append `/v2`.
-- `server.cluster_id`: optionally specify the target cluster ID.
-- `network.advertise_address` and `network.worker_ip`: an address reachable from Server and Prometheus.
-
-The Docker example assumes a Linux host, Server on Docker's default bridge, and WorkerSim using host networking. `172.17.0.1` is an example gateway; use your host's actual address. A Server container's `127.0.0.1` refers to that container.
-
-### 2. Reserve service ports
-
-Before starting a fleet, reserve its inference port pool against automatic Linux source-port allocation. The example has two workers:
+### 1. Copy GPUStack's Add Worker command
 
 ```bash
-sudo python3 scripts/configure_port_reservations.py --workers 2 --apply
+sudo docker run -d --name gpustack-worker \
+  -e "GPUSTACK_RUNTIME_DEPLOY_MIRRORED_NAME=gpustack-worker" \
+  -e "GPUSTACK_TOKEN=<cluster-token>" \
+  --restart=unless-stopped --privileged --network=host \
+  --volume /var/run/docker.sock:/var/run/docker.sock \
+  --volume gpustack-data:/var/lib/gpustack \
+  --runtime nvidia \
+  gpustack/gpustack:v2.3.1 \
+  --server-url http://<server> --worker-ip <host-ip>
 ```
 
-Adjust the count to match the configuration. The helper preserves existing reservations; existing connections and TIME_WAIT entries are not cleared.
+### 2. Change three things
 
-### 3. Start WorkerSim
+1. Replace the image with **`gpustack/workersim:0.1.3`**.
+2. Delete **`--runtime nvidia`** (or `ascend`, etc.) and any `--device /dev/infiniband`
+   line: a CPU-only host has neither, and Docker refuses to start with them.
+3. Append the fleet size and hardware preset.
 
 ```bash
-export GPUSTACK_REGISTRATION_TOKEN='<cluster-registration-token>'
-docker pull gpustack/workersim:0.1.2
-docker compose up -d --no-build
-docker compose logs -f workersim
-docker compose exec workersim workersim --config /config/fleet.yaml status
+sudo docker run -d --name workersim \
+  -e "GPUSTACK_TOKEN=<cluster-token>" \
+  --restart=unless-stopped --privileged --network=host \
+  --volume gpustack-data:/var/lib/gpustack \
+  gpustack/workersim:0.1.3 \
+  --server-url http://<server> --worker-ip <host-ip> \
+  --workers 20 --profile h100-80gb
 ```
 
-Compose enables automatic restart, persistent identity storage, host networking, and a file-descriptor limit of 65536. The **linux/amd64** image runs as UID **10001**, without privileged mode or a Docker socket mount.
+Open the cluster in the UI: 20 Workers named `<hostname>-sim-001`… become **Ready**, each
+with eight H100 cards. Deploy models normally; the real Server schedules them.
+
+Everything else in GPUStack's command may stay. The Docker socket and
+`GPUSTACK_RUNTIME_DEPLOY_MIRRORED_NAME` are ignored and can be removed. `--privileged`
+lets WorkerSim reserve its listener ports in the host's automatic source-port range at
+each start (needed for large fleets), after which it drops to UID 10001. Without it the
+fleet still starts and logs that ports were not reserved. Identities persist in
+`gpustack-data` under `workersim/`; a real Worker's files there are never changed.
+
+```bash
+docker logs -f workersim
+curl -s http://127.0.0.1:20099/status   # fleet status, from the host
+```
+
+### Fleet size and hardware
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--workers N` | `1` | Simulated Workers in this container (1–1000). |
+| `--profile NAME` | `h100-80gb` | Hardware preset: device plus a typical host. List them with `--list-profiles`. |
+| `--gpus-per-worker N` | preset | Cards per Worker. |
+| `--gpu-name TEXT`, `--gpu-memory-gib N` | preset | Reported device name and memory per card. |
+| `--cpu-cores N`, `--memory-gib N`, `--disk-gib N` | preset | Host CPU threads, RAM and disk per Worker. |
+| `--label KEY=VALUE` | — | Worker label, repeatable. |
+| `--nvlink-domain-workers N` | — | Workers per multi-node NVLink domain (NVIDIA). |
+| `--model-rps N` | `2` | Synthetic background requests/s per running model; `0` for idle. |
+| `--worker-name PREFIX` | `<hostname>-sim` | Worker name prefix (`PREFIX-001`, …). |
+| `--group KEY=VALUE,...` | — | Add a group for mixed fleets; repeatable. Keys: `workers`, `profile`, `gpus`, `prefix`, `gpu-name`, `gpu-memory-gib`, `cpu-cores`, `memory-gib`, `disk-gib`, `nvlink-domain-workers`. |
+| `--dry-run` | — | Print the resolved fleet, addresses and ports, then exit. |
+
+Each option can also be set as an environment variable, for example
+`-e WORKERSIM_WORKERS=20 -e WORKERSIM_PROFILE=b300-288gb`; groups use
+`WORKERSIM_GROUPS="workers=10,profile=b300-288gb;workers=3,profile=ascend-910b4-64gb"`.
+
+| Preset | Device | Memory/card | Cards | CPU | RAM | Disk |
+|---|---|---:|---:|---:|---:|---:|
+| `b300-288gb` | NVIDIA B300 | 288 GiB | 8 | 224 | 2048 GiB | 8192 GiB |
+| `h100-80gb` | NVIDIA H100 80GB HBM3 | 80 GiB | 8 | 224 | 2048 GiB | 8192 GiB |
+| `a800-80gb` | NVIDIA A800-SXM4-80GB | 80 GiB | 8 | 128 | 1024 GiB | 4096 GiB |
+| `rtx4090-24gb` | NVIDIA GeForce RTX 4090 | 24 GiB | 8 | 64 | 512 GiB | 2048 GiB |
+| `ascend-910b4-64gb` | Ascend 910B4 | 64 GiB | 8 | 192 | 1536 GiB | 4096 GiB |
+
+Mixed example: ten 4-card B300 Workers plus three Ascend Workers.
+
+```bash
+gpustack/workersim:0.1.3 --server-url http://<server> --worker-ip <host-ip> \
+  --group workers=10,profile=b300-288gb,gpus=4 \
+  --group workers=3,profile=ascend-910b4-64gb
+```
+
+Native flags `--worker-port` and `--worker-metrics-port` set the first Worker's API and
+metrics ports. Unknown native flags are logged and ignored. One container per host is
+simplest; for a second container on the same host, give it different `--worker-port` /
+`--worker-metrics-port` values and its own volume.
+
+### Compose and YAML
+
+For fleets described in a file, the Compose setup is unchanged: edit
+[`configs/docker.yaml`](configs/docker.yaml), set `GPUSTACK_REGISTRATION_TOKEN`, and run
+`docker compose up -d --no-build`. Flags may also be combined with a mounted
+`--config` file; flags override it.
 
 Docker images are published at [`gpustack/workersim`](https://hub.docker.com/r/gpustack/workersim).
-The previous Docker Hub repository was removed. Update existing Compose/image
-references while keeping configuration mounts, identity volumes, container names,
-and explicit port settings. The GitHub repository and Python package remain
-`gpustack-workersim`.
-
-Open the cluster in GPUStack UI. Workers should become **Ready**. Deploy models normally through UI or API; the real Server schedules them and WorkerSim simulates their startup.
 
 ## Configuration
 
