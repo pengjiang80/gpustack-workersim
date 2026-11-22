@@ -106,8 +106,8 @@ async def test_native_command_registers_fleet(config, control_plane, monkeypatch
         "--data-dir", str(tmp_path), "--worker-port", str(config.network.api_port_base),
     ], {})
     quick = build_config(args, {"GPUSTACK_TOKEN": "registration-secret"})
-    quick.network.api_port_base = 33800
-    quick.network.metrics_port_base = 33900
+    quick.network.api_port_base = 32700
+    quick.network.metrics_port_base = 32800
     quick.network.control_port = config.network.control_port
     quick.network.instance_port_start, quick.network.instance_port_end = 31000, 31019
     quick.validate()
