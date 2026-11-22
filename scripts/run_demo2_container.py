@@ -7,7 +7,7 @@ from pathlib import Path
 
 DIRECTORY = Path("/opt/gpustack-workersim-demo2")
 NAME = "gpustack-workersim-demo2"
-IMAGE = "gpustack/workersim:0.1.2"
+IMAGE = "gpustack/workersim:0.1.3"
 
 
 def docker(*args, check=True):

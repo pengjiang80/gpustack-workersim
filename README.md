@@ -2,110 +2,154 @@
 
 [![CI](https://github.com/pengjiang80/gpustack-workersim/actions/workflows/ci.yml/badge.svg)](https://github.com/pengjiang80/gpustack-workersim/actions/workflows/ci.yml)
 [![Docker Hub](https://img.shields.io/badge/Docker%20Hub-gpustack%2Fworkersim-2496ED?logo=docker)](https://hub.docker.com/r/gpustack/workersim)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 
-**Test GPUStack scheduling, deployment lifecycles, and monitoring on CPU-only machines.**
+**Add hundreds of simulated GPU workers to a real GPUStack cluster, on a CPU-only machine.**
 
-WorkerSim is a standalone worker protocol simulator for unmodified GPUStack. On Linux, one process can register up to **1000 independent workers**, expose virtual GPU/NPU inventories, receive assignments from the real scheduler, and report synthetic monitoring data to the standard UI.
+WorkerSim registers virtual Workers with an unmodified GPUStack Server. They appear in the
+UI with GPUs or NPUs, receive real scheduling decisions, "run" models, and report metrics,
+just like real Workers, so you can test scheduling, deployments and Server performance
+without GPU hardware.
 
-WorkerSim has its own product version. See [Releases](https://github.com/pengjiang80/gpustack-workersim/releases) for the GPUStack version supported by each release. Like the native Worker, startup checks the Server version and logs a warning on a mismatch without blocking.
-
-[中文说明](README.zh-CN.md) · [Quick start](#quick-start) · [Configuration](#configuration) · [Validation](#validation) · [Publishing](docs/publishing.md)
-
-> GPUStack Server performs the scheduling; WorkerSim simulates the workers. No GPU hardware, model weights, or inference engines are required. Synthetic throughput, latency, utilization, and power values are not hardware benchmarks.
-
-## Features
-
-- **Independent identities:** worker registration, credentials, heartbeat, authenticated APIs, and persistent identities across restarts.
-- **Configurable hardware:** worker count, accelerator profiles with custom device names and per-card memory, cards per worker, CPU, RAM, disk, and labels. Supports NVIDIA GPUs and Ascend CANN NPUs, including NVLink-domain topology facts and per-NPU RoCE addresses.
-- **Deployment lifecycles:** receives real assignments and reports initialization, startup, running, failure, and stop transitions.
-- **Scheduling scenarios:** ordinary replicas, cross-worker placement, PD prefill/decode/router roles, and tested vLLM/SGLang orchestration layouts with generation-fenced workload reports.
-- **Native communication:** six event watches per worker, independent HTTP connections, native heartbeat/status cadence, watch caches, reconnect replay, authoritative cleanup checks, orphan-workload sweeps, and runtime-metrics reads, so Server load matches real Workers.
-- **Model-file simulation:** download progress, Ready state, virtual paths, and synthetic file sizes without downloading weights.
-- **Native monitoring:** Worker node families plus engine-native vLLM, SGLang, MindIE, PD-router and SGLang-gateway expositions, normalized on the Worker with the Server's `/v2/metrics/config` exactly like GPUStack's runtime-metrics aggregator.
-- **Synthetic APIs:** chat, streaming chat, embeddings, reranking, transcription, and a short silent WAV speech fixture.
-- **Fault controls:** simulate offline workers and runtime failure, then exercise GPUStack's normal recovery flow, including the Worker-side restart with exponential backoff (10 s doubling to 300 s) for `restart_on_error` models.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    UI[GPUStack UI] --> S[Unmodified GPUStack Server]
-    S -->|Assignments and events| W[WorkerSim: independent virtual workers]
-    W -->|Registration, heartbeat and workload reports| S
-    P[Prometheus / Grafana] -->|Scrape worker and model metrics| W
-    S -->|Gateway requests| E[Synthetic engine endpoints]
-    W --> E
-```
-
-Server and WorkerSim can share a CPU host or run on different hosts. Server and Prometheus must be able to reach the advertised worker addresses.
+[中文说明](README.zh-CN.md) · [Releases](https://github.com/pengjiang80/gpustack-workersim/releases)
 
 ## Quick start
 
-### 1. Configure a test cluster
+You need a GPUStack **2.3.1** Server and a Linux amd64 host with Docker.
 
-Use a GPUStack Server supported by your WorkerSim release. Create a test cluster in the UI and obtain its worker registration token from the **Add Worker** instructions.
-
-```bash
-git clone https://github.com/pengjiang80/gpustack-workersim.git
-cd gpustack-workersim
-```
-
-Edit [`configs/docker.yaml`](configs/docker.yaml):
-
-- `server.url`: Server root URL as reached from WorkerSim; do not append `/v2`.
-- `server.cluster_id`: optionally specify the target cluster ID.
-- `network.advertise_address` and `network.worker_ip`: an address reachable from Server and Prometheus.
-
-The Docker example assumes a Linux host, Server on Docker's default bridge, and WorkerSim using host networking. `172.17.0.1` is an example gateway; use your host's actual address. A Server container's `127.0.0.1` refers to that container.
-
-### 2. Reserve service ports
-
-Before starting a fleet, reserve its inference port pool against automatic Linux source-port allocation. The example has two workers:
+**1.** In GPUStack, open **Clusters → Add Worker** and copy the command. It looks like:
 
 ```bash
-sudo python3 scripts/configure_port_reservations.py --workers 2 --apply
+sudo docker run -d --name gpustack-worker \
+  -e "GPUSTACK_RUNTIME_DEPLOY_MIRRORED_NAME=gpustack-worker" \
+  -e "GPUSTACK_TOKEN=<cluster-token>" \
+  --restart=unless-stopped --privileged --network=host \
+  --volume /var/run/docker.sock:/var/run/docker.sock \
+  --volume gpustack-data:/var/lib/gpustack \
+  --runtime nvidia \
+  gpustack/gpustack:v2.3.1 \
+  --server-url http://<server> --worker-ip <host-ip>
 ```
 
-Adjust the count to match the configuration. The helper preserves existing reservations; existing connections and TIME_WAIT entries are not cleared.
+**2.** Make three changes:
 
-### 3. Start WorkerSim
+- replace the image with `gpustack/workersim:0.1.3`;
+- delete `--runtime nvidia` (and `--device /dev/infiniband` if present);
+- add how many Workers you want and their hardware at the end.
 
 ```bash
-export GPUSTACK_REGISTRATION_TOKEN='<cluster-registration-token>'
-docker pull gpustack/workersim:0.1.2
-docker compose up -d --no-build
-docker compose logs -f workersim
-docker compose exec workersim workersim --config /config/fleet.yaml status
+sudo docker run -d --name workersim \
+  -e "GPUSTACK_TOKEN=<cluster-token>" \
+  --restart=unless-stopped --privileged --network=host \
+  --volume gpustack-data:/var/lib/gpustack \
+  gpustack/workersim:0.1.3 \
+  --server-url http://<server> --worker-ip <host-ip> \
+  --workers 20 --profile h100-80gb
 ```
 
-Compose enables automatic restart, persistent identity storage, host networking, and a file-descriptor limit of 65536. The **linux/amd64** image runs as UID **10001**, without privileged mode or a Docker socket mount.
+**3.** Open the cluster in the UI. Twenty Workers named `<hostname>-sim-001` … `-020`
+become **Ready**, each with eight H100 cards. Deploy models as usual.
 
-Docker images are published at [`gpustack/workersim`](https://hub.docker.com/r/gpustack/workersim).
-The previous Docker Hub repository was removed. Update existing Compose/image
-references while keeping configuration mounts, identity volumes, container names,
-and explicit port settings. The GitHub repository and Python package remain
-`gpustack-workersim`.
+```bash
+docker logs -f workersim                    # startup and errors
+curl -s http://127.0.0.1:20099/status       # fleet status
+```
 
-Open the cluster in GPUStack UI. Workers should become **Ready**. Deploy models normally through UI or API; the real Server schedules them and WorkerSim simulates their startup.
+## Choose Workers and hardware
 
-## Configuration
+| Option | Default | Meaning |
+|---|---|---|
+| `--workers N` | `1` | Number of Workers (up to 1000 per container). |
+| `--profile NAME` | `h100-80gb` | Hardware preset, see below. |
+| `--gpus-per-worker N` | from preset | Cards per Worker. |
+| `--gpu-name TEXT` | from preset | Device name shown in GPUStack. |
+| `--gpu-memory-gib N` | from preset | Memory per card. |
+| `--cpu-cores N` · `--memory-gib N` · `--disk-gib N` | from preset | Host CPU threads, RAM, disk. |
+| `--label KEY=VALUE` | — | Worker label; repeat for more. |
+| `--worker-name PREFIX` | `<hostname>-sim` | Name prefix: `PREFIX-001`, `PREFIX-002`, … |
+| `--model-rps N` | `2` | Fake background requests/s per running model (`0` = idle). |
+| `--dry-run` | — | Show what would start, then exit. |
 
-Example: ten workers, eight B300 devices per worker:
+| Preset | Device | Memory/card | Cards | CPU | RAM | Disk |
+|---|---|---:|---:|---:|---:|---:|
+| `b300-288gb` | NVIDIA B300 | 288 GiB | 8 | 224 | 2048 GiB | 8192 GiB |
+| `h100-80gb` | NVIDIA H100 80GB HBM3 | 80 GiB | 8 | 224 | 2048 GiB | 8192 GiB |
+| `a800-80gb` | NVIDIA A800-SXM4-80GB | 80 GiB | 8 | 128 | 1024 GiB | 4096 GiB |
+| `rtx4090-24gb` | NVIDIA GeForce RTX 4090 | 24 GiB | 8 | 64 | 512 GiB | 2048 GiB |
+| `ascend-910b4-64gb` | Ascend 910B4 | 64 GiB | 8 | 192 | 1536 GiB | 4096 GiB |
+
+**Mixed fleet:** repeat `--group` instead of `--workers`/`--profile`:
+
+```bash
+  --group workers=10,profile=b300-288gb,gpus=4 \
+  --group workers=3,profile=ascend-910b4-64gb
+```
+
+Group keys: `workers`, `profile`, `gpus`, `prefix`, `gpu-name`, `gpu-memory-gib`,
+`cpu-cores`, `memory-gib`, `disk-gib`, `nvlink-domain-workers`.
+
+**Environment variables:** every option also works as `-e WORKERSIM_<OPTION>`, for example
+`-e WORKERSIM_WORKERS=20 -e WORKERSIM_PROFILE=b300-288gb`. Groups:
+`-e WORKERSIM_GROUPS="workers=10,profile=b300-288gb;workers=3,profile=ascend-910b4-64gb"`.
+
+## What gets simulated
+
+- **Workers:** registration, heartbeats, status, labels and persistent identities.
+- **Hardware:** GPUs/NPUs with usage, memory, temperature and power that follow the
+  deployed models.
+- **Deployments:** real scheduling results go through initializing → starting → running;
+  replicas, multi-Worker, and PD (prefill/decode/router) layouts are supported.
+- **Model files:** download progress and Ready state, without downloading anything.
+- **APIs:** chat (incl. streaming), embeddings, rerank, transcription and speech return
+  fixed synthetic responses through the normal GPUStack gateway.
+- **Metrics:** Worker and model metrics in GPUStack's native format for Prometheus/Grafana.
+- **Server load:** the same requests, watches and timings as real 2.3.1 Workers.
+
+Nothing is computed: no inference, no GPU kernels, no weight downloads. Throughput,
+latency and utilization numbers are synthetic and are not benchmarks.
+
+---
+
+## Advanced usage
+
+### Notes on the docker command
+
+- `--privileged` is optional. With it, WorkerSim reserves its ports on the host at each
+  start (recommended above ~50 Workers), then runs as an unprivileged user.
+- `--network=host` is required: GPUStack and Prometheus connect to the Workers' ports.
+- `GPUSTACK_TOKEN`, `--server-url`, `--worker-ip`, `--advertise-address`, `--worker-port`
+  and `--worker-metrics-port` work as on a real Worker. Other GPUStack flags are ignored,
+  and the Docker socket is not used.
+- Worker identities are kept in the `gpustack-data` volume (in `workersim/`). Keep the
+  volume to keep the same Workers after a restart.
+- To run a second WorkerSim container on the same host, give it its own volume and
+  different `--worker-port` / `--worker-metrics-port` values.
+
+### Fault and scale tests
+
+The fleet control API listens on `127.0.0.1:20099` on the host.
+
+```bash
+# Take Workers offline: keep only the first 5 online
+curl -X POST http://127.0.0.1:20099/scale -H 'Content-Type: application/json' -d '{"count": 5}'
+
+# Make a model instance fail (it is restarted with backoff, as on a real Worker)
+curl -X POST http://127.0.0.1:20099/fault -H 'Content-Type: application/json' \
+  -d '{"worker": "<worker-name>", "instance_id": 10, "action": "fail-instance"}'
+```
+
+Offline Workers show as unavailable after GPUStack's heartbeat grace period.
+
+### YAML configuration and Compose
+
+For repeatable setups, describe the fleet in a file. Flags can be combined with
+`--config`; flags win.
 
 ```yaml
 server:
-  url: http://127.0.0.1:8080
-  cluster_id: 1
+  url: http://10.0.0.5
 network:
-  advertise_address: 172.17.0.1
-  worker_ip: 172.17.0.1
-simulation:
-  namespace: workersim-b300
-  data_dir: /data
-  registration_rate: 2
-  reconcile_interval: 0
-  model_requests_per_second: 2
+  worker_ip: 10.0.0.9
+  advertise_address: 10.0.0.9
 worker_groups:
   - name_prefix: sim-b300
     count: 10
@@ -114,168 +158,97 @@ worker_groups:
     cpu_cores: 192
     memory_gib: 2048
     disk_gib: 8192
+    labels: {rack: a}
 ```
 
-`model_requests_per_second` generates synthetic background traffic independently of client requests. Set it to `0` for idle model traffic.
+Start it with Compose: edit [`configs/docker.yaml`](configs/docker.yaml), then
 
-### Accelerator profiles
-
-| Profile | Device | Configured memory per device | Runtime |
-|---|---|---:|---|
-| `b300-288gb` | NVIDIA B300 | 288 GiB | CUDA |
-| `h100-80gb` | NVIDIA H100 | 80 GiB | CUDA |
-| `a800-80gb` | NVIDIA A800 | 80 GiB | CUDA |
-| `rtx4090-24gb` | NVIDIA RTX 4090 | 24 GiB | CUDA |
-| `ascend-910b4-64gb` | Ascend 910B4 | 64 GiB | CANN |
-
-Capacity, driver/runtime versions, and power envelopes are simulation parameters. Ascend devices report `ascend/cann` and no CUDA compute capability.
-
-### Custom device names and memory
-
-Keep a built-in `gpu_profile` as the template and override either or both fields
-in each worker group:
-
-```yaml
-worker_groups:
-  - name_prefix: sim-custom
-    count: 10
-    gpu_profile: b300-288gb
-    gpu_name: "My Test GPU"
-    gpu_memory_gib: 144
-    gpu_count: 8
-    memory_gib: 2048
+```bash
+export GPUSTACK_REGISTRATION_TOKEN='<cluster-token>'
+docker compose up -d --no-build
 ```
+
+More examples: [mixed GPU/NPU](configs/custom-gpu.yaml), [50 Workers](configs/fleet-50.yaml),
+[100 B300 Workers](configs/fleet-100-b300.yaml), [1000 B300 Workers](configs/fleet-1000-b300.yaml).
+Check a file with `workersim --config <file> validate`.
+
+Extra per-group fields beyond the flags above:
 
 | Field | Meaning |
 |---|---|
-| `gpu_name` | Device name reported to GPUStack and used in monitoring labels. Must be a nonempty string; surrounding whitespace is trimmed. |
-| `gpu_memory_gib` | Total memory **per card**, in GiB (`1 GiB = 2^30 bytes`). Accepts positive finite numbers, including fractions such as `96.5`; reports whole bytes. |
-| `memory_gib` | Host RAM, independent of device memory. |
+| `nvlink_domain_workers` | Workers per multi-node NVLink domain (NVIDIA, e.g. `18` for NVL72 with 4 cards). Reported as the `nvidia.com/gpu.clique` topology. |
+| `kv_transfer_ifname` | Reported as the Worker's KV-transfer network interface. |
+| `reserved_ram_gib`, `reserved_vram_gib` | System reservation per Worker / per card (defaults 2 and 1 GiB). |
 
-Omit an override or set it to `null` to inherit that value from the template.
-Overrides apply to every card in the group and do not change other groups or the
-built-in profiles. `reserved_vram_gib` must be smaller than the effective per-card
-memory; its default is 1 GiB, so reduce it for devices with smaller capacities.
+Network-level fields: `network.npu_roce_cidr` (default `10.200.0.0/16`) gives each Ascend
+NPU a RoCE address, which MindIE multi-node placement needs; `null` disables it.
+`network.worker_ip_cidr` gives each Worker its own IP (host addresses must exist; see
+[`configure_virtual_network.py`](scripts/configure_virtual_network.py)).
 
-Vendor, CUDA/CANN type, architecture, compute capability, driver/runtime versions,
-and power still come from the template. A new name does not select a different
-backend or architecture: choose a template suitable for the scheduling scenario.
-GPUStack receives the custom name and capacity through normal status reports;
-monitoring uses the same values. Restart WorkerSim after editing the config,
-keeping its identity volume and worker names.
+A renamed or resized card keeps its preset's vendor, architecture and driver versions.
 
-### Topology and device network
+### Ports and large fleets
 
-| Field | Scope | Meaning |
-|---|---|---|
-| `nvlink_domain_workers` | worker group | Workers per multi-node NVLink domain, NVIDIA only. Each card reports the `nvidia.com/gpu.clique` topology hint (`<fabric-uuid>.0`) and each Worker reports the agreed `topology_facts`, like the native NVML fabric probe. Omit for single-host HGX systems, which report no domain. |
-| `kv_transfer_ifname` | worker group | Reported verbatim as `kv_transfer_ifname`, like native `--kv-transfer-ifname`. |
-| `npu_roce_cidr` | `network` | Synthetic per-NPU RoCE addresses (default `10.200.0.0/16`, 64 addresses per Worker slot). Ascend devices report `network.status: up` with these addresses, which MindIE distributed placement requires. Set `null` to report no device network. |
-
-```yaml
-worker_groups:
-  - name_prefix: sim-gb300
-    count: 36
-    gpu_profile: b300-288gb
-    gpu_count: 4
-    nvlink_domain_workers: 18   # two NVL72 domains
-```
-
-See the [mixed GPU/NPU example](configs/custom-gpu.yaml). To use it with Compose,
-adjust its addresses and mount it at `/config/fleet.yaml` instead of
-`configs/docker.yaml`. Validate the edited file before starting:
-
-```bash
-workersim --config configs/custom-gpu.yaml validate
-```
-
-Fleet examples: [50 mixed GPU workers](configs/fleet-50.yaml), [100 eight-card B300 workers](configs/fleet-100-b300.yaml), [1000 eight-card B300 workers](configs/fleet-1000-b300.yaml), and [three eight-card 910B4 workers](configs/demo2-3-910b4.yaml).
-
-### Networking and persistence
-
-| Service | Default shared-IP allocation |
+| Service | Default |
 |---|---|
-| Worker API | `20100–21099` for 1000 workers |
-| Worker metrics | `21100–22099` for 1000 workers |
-| Inference pool | 20 ports per worker, starting at `40000` |
+| Worker API | `20100` + Worker index |
+| Worker metrics | `21100` + Worker index |
+| Model endpoints | 20 ports per Worker from `40000` (1000 Workers: 40000–59999) |
 | Fleet control | `127.0.0.1:20099` |
 
-At 1000 workers, the inference pool spans **40000–59999**. The first worker uses `40000–40019`, the last `59980–59999`. These are simulator defaults; GPUStack Server is unchanged. Model listeners are opened only for assigned workloads. Complex distributed/PD layouts may need more ports on a worker; increase `network.instance_port_end` and reduce fleet size or use separate IPs/hosts. The reservation helper accepts matching `--ports-per-worker` and `--start-port` overrides.
+Model ports are opened only when a model runs. Complex PD/distributed layouts may need
+more than 20 ports per Worker: raise `network.instance_port_end` in YAML.
 
-Use distinct service pools for multiple simulator processes on one host. Optional `network.worker_ip_cidr` assigns separate worker IPs; configure host addresses and routing before startup. A Linux test-host helper is available in [`configure_virtual_network.py`](scripts/configure_virtual_network.py).
+For several hundred Workers, run with `--privileged` (or reserve ports yourself with
+[`configure_port_reservations.py`](scripts/configure_port_reservations.py)), keep the
+container's open-file limit at 65536 or more, and size the GPUStack Server and database
+for the load: every simulated Worker talks to the Server as a real one does. Workers
+start at 5 per second by default (`simulation.registration_rate`).
 
-For 1000 workers, mount `configs/fleet-1000-b300.yaml` as `/config/fleet.yaml` in Compose and run `sudo python3 scripts/configure_port_reservations.py --workers 1000 --expand-ephemeral-range --apply`. The helper reserves API, metrics, control, and model ports, and explicitly expands the test host's automatic source-port range so thousands of independent outbound connections fit. Keep `nofile=65536`.
+### How WorkerSim matches a real Worker
 
-Each worker has **six persistent event watches** and its own connection pool. Heartbeat/status reports start immediately and repeat every 30 seconds after completion. Runtime metrics retain the native Worker lookup cadence. There is no fleet-wide REST limiter or shared connection pool to reduce Server pressure. See the [communication contract](docs/native-worker-communication.md) for endpoints, cache behavior, retry timing, and supported execution scope.
+WorkerSim reproduces GPUStack 2.3.1's Worker traffic: six event watches per Worker,
+heartbeat and status every 30 s, watch caches and reconnects, orphan-workload sweeps,
+restart of failed instances with backoff (10 s doubling to 300 s), and runtime-metrics
+collection normalized with the Server's metrics config. Details:
+[communication contract](docs/native-worker-communication.md). A Server version mismatch
+only logs a warning, as on a real Worker.
 
-By default WorkerSim starts at most 5 workers/s (`registration_rate`), with up to 8 workers starting concurrently (`registration_concurrency`); these settings affect fleet startup only. Keep `reconcile_interval: 0` for the native cache-backed behavior. Size the Server/database for the generated load; 1000-worker simulator capacity is not a scheduler throughput guarantee. Acceptance can use GPUStack's documented database pool settings without changing Worker traffic.
+### Validation reports
 
-Keep the data directory or Docker volume to preserve identities. Each namespace belongs to one Server URL and has a process lock. Fleet configuration changes require a restart; retain worker names and group order to preserve port assignments.
+| Scenario | Report |
+|---|---|
+| 1000-Worker protocol fixture; real-Server 500/1000 limits | [Scale validation](docs/scale-1000-validation.md) |
+| 100 Workers / 800 B300 devices on unmodified GPUStack | [Integration](docs/workersim-040-validation.md) |
+| GLM-5.3 PD 5P3D at 10–100 Workers | [PD experiment](docs/glm53-pd-benchmark-2026-11-17.md) |
+| Enterprise build: 50 B300 Workers, 116 running replicas | [Deployment](docs/demo2-deployment-2026-11-17.md) |
+| Ascend: 3 Workers, 24 × 910B4 | [910B4 acceptance](docs/demo2-910b4-2026-11-17.md) |
+| Upgrade with custom CUDA/CANN devices | [Upgrade](docs/demo2-upgrade-2026-11-20.md) |
 
-## Deployment and failure testing
+### Limitations
 
-For an automated replica scenario, provide a GPUStack platform administrator API key:
+- Only NVIDIA and Ascend devices are simulated.
+- Benchmarks and cache services are not executed; tunnel proxy mode, `/cluster-proxy` and
+  GGUF parsing are not simulated.
+- Embeddings are fixed vectors, rerank keeps input order, speech is 0.25 s of silence.
+- Model metrics appear about 30 s after a model starts running, as on a real Worker.
+- Not every backend/layout combination has been validated against a real Server.
 
-```bash
-export GPUSTACK_API_KEY='<gpustack-platform-admin-api-key>'
-workersim --config configs/local.yaml scenario --replicas 2 5 1 0 --timeout 300
-```
+### Development
 
-This creates an owned test model, changes replicas, waits for convergence, then deletes that test model. Results go to `outputs/scenario.json`. Elapsed time includes scheduling, simulated startup, and controller convergence.
-
-Simulate online worker counts within the configured fleet:
-
-```bash
-workersim --config configs/local.yaml fleet-scale 1
-workersim --config configs/local.yaml fleet-scale 2
-workersim --config configs/local.yaml stop
-```
-
-`fleet-scale` changes availability, rather than registering or deleting workers. GPUStack's heartbeat grace period determines when offline state appears in UI. The loopback control API also supports instance failure injection through `POST /fault`.
-
-## Validation
-
-These are integration snapshots under the configurations and versions described in each report.
-
-| Scenario | Result | Report |
-|---|---|---|
-| demo2 upgrade / custom GPU reporting | 53 simulated workers and 28 models retained; custom CUDA/CANN names and memory verified | [Upgrade and image migration](docs/demo2-upgrade-2026-11-20.md) |
-| Native communication / 1000-Worker protocol fixture | 8000 devices, 6000 watches; original-Server 500/1000 stability not yet passed | [Scale validation and limits](docs/scale-1000-validation.md) |
-| Original GPUStack | 100 workers, 800 simulated B300 devices | [Integration](docs/workersim-040-validation.md) |
-| GLM-5.3 PD 5P3D | Tested at 10, 20, 40, 60, 80 and 100 workers | [Scale experiment and version boundaries](docs/glm53-pd-benchmark-2026-11-17.md) |
-| Tested GPUStack enterprise build | 50 B300 workers, 16 models, 116 running replicas | [Deployment acceptance](docs/demo2-deployment-2026-11-17.md) |
-| Ascend CANN inventory | 3 workers, 24 devices, 64 GiB each | [910B4 acceptance](docs/demo2-910b4-2026-11-17.md) |
-
-Compatibility details and the protocol source commit are recorded in each [Release](https://github.com/pengjiang80/gpustack-workersim/releases). Other versions need separate validation. `server.allow_version_mismatch` is deprecated and ignored: a version mismatch only logs a warning, as on the native Worker.
-
-## Scope and limitations
-
-- No real inference, weight downloads, GPU kernels, NCCL/Ray transport, or KV-cache data transfer occurs.
-- Embeddings are deterministic fixture vectors; reranking uses fixed order; transcription returns a simulation message; speech returns a **0.25-second silent WAV**, regardless of the requested encoding.
-- Synthetic metrics are unsuitable for inference benchmarking, request auditing, or billing. Model series appear after the native 30-second aggregation delay and expire 30 seconds after the last successful pass.
-- Benchmarks and cache services are watched and polled like native Workers, but their executions and logs (`/benchmark_logs`, `/cacheServiceInstanceLogs`) are not simulated. Tunnel proxy mode, `/cluster-proxy`, and GGUF parsing are also not simulated.
-- Managed (workload-report) instances recover through the Server; WorkerSim does not run the native managed-workload sync for them.
-- Scheduling and allocation decisions belong to GPUStack Server. Not every backend/layout combination has been validated.
-- Some legacy instance download percentages remain intermediate in the tested enterprise build even when Model Files are Ready/100% and instances are Running; see the acceptance report.
-
-## Development
-
-Python **3.11+** is required. Linux is recommended for larger fleets.
+Requires Python 3.11+.
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
 pip install -e '.[dev]'
-workersim --config configs/local.yaml validate
 ruff check workersim scripts tests
-ulimit -n 65536
 pytest -q
+workersim --server-url http://<server> --workers 2 --dry-run
 ```
 
-Edit the local config's addresses and data directory, set the registration token, then run `workersim --config configs/local.yaml run`. On Windows, activate `.venv\Scripts\Activate.ps1`.
-
-Protocol tests use a loopback control-plane fixture; real Server/UI integration is verified separately. CI runs on Linux with Python 3.12. Release instructions, version tags, and Docker Hub setup are in the [publishing guide](docs/publishing.md).
+Releases: [publishing guide](docs/publishing.md).
 
 ## License
 
-See [LICENSE](LICENSE). Derived GPUStack helpers retain their [original license](workersim/_vendor/LICENSE-GPUStack.txt) and [attribution](workersim/_vendor/NOTICE.md).
+See [LICENSE](LICENSE). Derived GPUStack code keeps its
+[original license](workersim/_vendor/LICENSE-GPUStack.txt) and
+[attribution](workersim/_vendor/NOTICE.md).

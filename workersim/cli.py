@@ -29,6 +29,9 @@ async def execute(args):
             )
         )
     elif args.command == "run":
+        from workersim.quickstart import drop_privileges
+
+        drop_privileges(config.simulation.data_dir)
         await Fleet(config).run()
     elif args.command == "scenario":
         result = await run_scenario(config, args.replicas, args.timeout, args.output)
@@ -47,7 +50,29 @@ async def execute(args):
                 print(json.dumps(await response.json(), indent=2))
 
 
+def native_main(argv):
+    """GPUStack Add Worker style: `workersim --server-url ... [--workers N --profile P]`."""
+    from workersim.quickstart import start
+
+    logging.basicConfig(
+        level=logging.DEBUG if "--verbose" in argv else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
+    try:
+        raise SystemExit(asyncio.run(start(argv)))
+    except KeyboardInterrupt:
+        pass
+    except (ValueError, RuntimeError, OSError) as error:
+        print(f"workersim: {str(error) or type(error).__name__}", file=sys.stderr)
+        raise SystemExit(1) from None
+
+
 def main():
+    from workersim.quickstart import is_native_invocation
+
+    if is_native_invocation(sys.argv[1:]):
+        return native_main(sys.argv[1:])
     parser = argparse.ArgumentParser(
         description="Independent CPU-only GPUStack 2.3.1 Worker simulator"
     )
